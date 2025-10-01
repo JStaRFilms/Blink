@@ -54,9 +54,12 @@ class HotkeyManager:
 
     def on_hotkey(self) -> None:
         """
-        Callback for when the hotkey is pressed. Starts the processing in a separate thread.
+        Callback for when the hotkey is pressed. Starts the processing and waits for completion.
         """
-        threading.Thread(target=self.process, daemon=True).start()
+        # Use non-daemon thread so the main process waits for streaming to complete
+        process_thread = threading.Thread(target=self.process, daemon=False)
+        process_thread.start()
+        process_thread.join()  # Wait for the streaming process to complete
 
     def process(self) -> None:
         """
@@ -70,10 +73,10 @@ class HotkeyManager:
         output_mode = self.config_manager.get("output_mode", "popup")
 
         if output_mode == "direct_stream":
-            # Use direct stream handler
+            # Use direct stream handler with proper completion signaling
             handler = DirectStreamHandler()
 
-            # Start the consumer thread
+            # Start the consumer thread (non-daemon so it prevents premature exit)
             handler.start_streaming()
 
             # Define callback for streaming chunks
@@ -83,8 +86,12 @@ class HotkeyManager:
             # Query the LLM with streaming
             self.llm_interface.query(text, on_chunk)
 
-            # Stop streaming and finalize any remaining buffered text
-            handler.stop_streaming()
+            # CRITICAL FIX: Signal completion AFTER query() returns
+            # This ensures the consumer processes all queued tokens before stopping
+            handler.stream_token(None)  # Send sentinel to signal "stream complete"
+            
+            # Wait for the consumer to finish processing everything
+            handler.wait_for_completion()
         else:
             # Use popup overlay (default behavior)
             # Reset and position overlay
