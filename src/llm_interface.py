@@ -1,42 +1,108 @@
 """
 LLM interface module for Blink.
 
-Provides a unified interface for communicating with LLMs, starting with Ollama.
+Provides a unified interface for communicating with LLMs, supporting Ollama and cloud models.
 """
 
 import json
 import requests
 from typing import Callable, Optional
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 
 class LLMInterface:
     """
     Interface for interacting with Large Language Models.
 
-    Currently supports Ollama with streaming responses.
+    Supports Ollama (local), OpenAI (cloud), and Google Gemini (cloud) models.
     """
 
-    def __init__(self, base_url: str = "http://localhost:11434") -> None:
+    def __init__(self, base_url: str = "http://localhost:11434", config_manager: Optional['ConfigManager'] = None) -> None:
         """
         Initializes the LLMInterface.
 
         Args:
             base_url (str): Base URL for the LLM API. Defaults to Ollama's default.
+            config_manager: Configuration manager for API keys and settings.
         """
         self.base_url = base_url
-        self.model = "llama3.2:latest"  # Hardcoded for MUS; make configurable later
+        self.lmstudio_base_url = "http://localhost:1234"  # LM Studio default
+        self.config_manager = config_manager
+        self.selected_model = "ollama:llama3.2:latest"  # Default model
 
-    def query_ollama(self, prompt: str, on_chunk: Callable[[str], None]) -> None:
+        if OPENAI_AVAILABLE and self.config_manager:
+            api_key = self.config_manager.get("openai_api_key")
+            if api_key:
+                self.openai_client = OpenAI(api_key=api_key)
+            else:
+                self.openai_client = None
+        else:
+            self.openai_client = None
+
+        if GEMINI_AVAILABLE and self.config_manager:
+            api_key = self.config_manager.get("gemini_api_key")
+            if api_key:
+                genai.configure(api_key=api_key)
+                self.gemini_available = True
+            else:
+                self.gemini_available = False
+        else:
+            self.gemini_available = False
+
+    def set_selected_model(self, model: str) -> None:
+        """
+        Sets the selected model for queries.
+
+        Args:
+            model (str): Model identifier (e.g., "ollama:llama3.2:latest" or "openai:gpt-4").
+        """
+        self.selected_model = model
+
+    def query(self, prompt: str, on_chunk: Callable[[str], None]) -> None:
+        """
+        Sends a query to the selected LLM and streams the response.
+
+        Args:
+            prompt (str): The text prompt to send to the model.
+            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+        """
+        if self.selected_model.startswith("ollama:"):
+            model_name = self.selected_model.split(":", 1)[1]
+            self.query_ollama(prompt, on_chunk, model_name)
+        elif self.selected_model.startswith("openai:"):
+            model_name = self.selected_model.split(":", 1)[1]
+            self.query_openai(prompt, on_chunk, model_name)
+        elif self.selected_model.startswith("gemini:"):
+            model_name = self.selected_model.split(":", 1)[1]
+            self.query_gemini(prompt, on_chunk, model_name)
+        elif self.selected_model.startswith("lmstudio:"):
+            model_name = self.selected_model.split(":", 1)[1]
+            self.query_lmstudio(prompt, on_chunk, model_name)
+        else:
+            on_chunk("Error: Unsupported model type")
+
+    def query_ollama(self, prompt: str, on_chunk: Callable[[str], None], model: str = "llama3.2:latest") -> None:
         """
         Sends a query to Ollama and streams the response.
 
         Args:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+            model (str): Ollama model name.
         """
         url = f"{self.base_url}/api/generate"
         data = {
-            "model": self.model,
+            "model": model,
             "prompt": prompt,
             "stream": True
         }
@@ -59,3 +125,126 @@ class LLMInterface:
         except requests.RequestException as e:
             error_msg = f"Error communicating with Ollama: {e}"
             on_chunk(error_msg)
+
+    def query_openai(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
+        """
+        Sends a query to OpenAI and streams the response.
+
+        Args:
+            prompt (str): The text prompt to send to the model.
+            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+            model (str): OpenAI model name.
+        """
+        if not self.openai_client:
+            on_chunk("Error: OpenAI client not configured. Please set API key in settings.")
+            return
+
+        try:
+            stream = self.openai_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True
+            )
+
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    on_chunk(chunk.choices[0].delta.content)
+
+        except Exception as e:
+            error_msg = f"Error communicating with OpenAI: {e}"
+            on_chunk(error_msg)
+
+    def query_gemini(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
+        """
+        Sends a query to Google Gemini and streams the response.
+
+        Args:
+            prompt (str): The text prompt to send to the model.
+            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+            model (str): Gemini model name.
+        """
+        if not self.gemini_available:
+            on_chunk("Error: Gemini client not configured. Please set API key in settings.")
+            return
+
+        try:
+            gemini_model = genai.GenerativeModel(model)
+            response = gemini_model.generate_content(prompt, stream=True)
+
+            for chunk in response:
+                if chunk.text:
+                    on_chunk(chunk.text)
+
+        except Exception as e:
+            error_msg = f"Error communicating with Gemini: {e}"
+            on_chunk(error_msg)
+
+    def query_lmstudio(self, prompt: str, on_chunk: Callable[[str], None], model: str = "local-model") -> None:
+        """
+        Sends a query to LM Studio and streams the response.
+
+        Args:
+            prompt (str): The text prompt to send to the model.
+            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+            model (str): LM Studio model name.
+        """
+        try:
+            # Create OpenAI client for LM Studio (OpenAI-compatible API)
+            lmstudio_client = OpenAI(base_url=self.lmstudio_base_url + "/v1", api_key="not-needed")
+            stream = lmstudio_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True
+            )
+
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    on_chunk(chunk.choices[0].delta.content)
+
+        except Exception as e:
+            error_msg = f"Error communicating with LM Studio: {e}"
+            on_chunk(error_msg)
+
+    def get_available_models(self) -> list[str]:
+        """
+        Returns a list of available models.
+
+        Returns:
+            list[str]: List of model identifiers.
+        """
+        models = []
+
+        # Fetch Ollama models dynamically
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                ollama_models = data.get("models", [])
+                for model in ollama_models:
+                    models.append(f"ollama:{model['name']}")
+            else:
+                # Fallback to hardcoded if API fails
+                models.extend(["ollama:llama3.2:latest", "ollama:llama2:latest"])
+        except requests.RequestException:
+            # Fallback if Ollama not running
+            models.extend(["ollama:llama3.2:latest", "ollama:llama2:latest"])
+
+        # Fetch LM Studio models dynamically
+        try:
+            response = requests.get(f"{self.lmstudio_base_url}/v1/models", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                lmstudio_models = data.get("data", [])
+                for model in lmstudio_models:
+                    models.append(f"lmstudio:{model['id']}")
+        except requests.RequestException:
+            # LM Studio not running, skip
+            pass
+
+        # Add cloud models if configured
+        if self.openai_client:
+            models.extend(["openai:gpt-4", "openai:gpt-3.5-turbo"])
+        if self.gemini_available:
+            models.extend(["gemini:gemini-flash-latest", "gemini:gemini-flash-lite-latest"])
+
+        return models

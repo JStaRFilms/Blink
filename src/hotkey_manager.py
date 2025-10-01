@@ -57,12 +57,13 @@ class HotkeyManager:
         """
         Processes the hotkey event: captures text, queries LLM, and displays overlay.
         """
-        text = self.text_capturer.capture_selected_text()
+        text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
         if not text.strip():
             return  # No text selected
 
-        # Reset and show overlay
+        # Reset and position overlay
         self.overlay_ui.reset_signal.emit()
+        self.overlay_ui.position_near_selection(selection_rect)
         self.overlay_ui.show_signal.emit()
 
         # Define callback for streaming chunks
@@ -70,4 +71,4 @@ class HotkeyManager:
             self.overlay_ui.append_signal.emit(chunk)
 
         # Query the LLM with streaming
-        self.llm_interface.query_ollama(text, on_chunk)
+        self.llm_interface.query(text, on_chunk)
