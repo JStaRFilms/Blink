@@ -4,14 +4,14 @@ Settings dialog module for Blink.
 Provides a GUI for configuring API keys and model selection.
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup, QTextEdit
 from PyQt6.QtCore import pyqtSignal
 from typing import Optional
 
 
 class SettingsDialog(QDialog):
     """
-    Settings dialog for configuring API keys and model preferences.
+    Settings dialog for configuring API keys and mode swl preferences.
     """
 
     settings_changed = pyqtSignal()
@@ -97,6 +97,19 @@ class SettingsDialog(QDialog):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
+        # System Prompt section
+        prompt_group = QGroupBox("AI System Prompt")
+        prompt_layout = QVBoxLayout()
+
+        prompt_layout.addWidget(QLabel("Customize AI behavior (optional):"))
+        self.system_prompt_edit = QTextEdit()
+        self.system_prompt_edit.setPlaceholderText("Enter system prompt to customize AI responses...")
+        self.system_prompt_edit.setMaximumHeight(100)
+        prompt_layout.addWidget(self.system_prompt_edit)
+
+        prompt_group.setLayout(prompt_layout)
+        layout.addWidget(prompt_group)
+
         # Buttons
         button_layout = QHBoxLayout()
         save_button = QPushButton("Save")
@@ -133,6 +146,10 @@ class SettingsDialog(QDialog):
             self.direct_stream_radio.setChecked(True)
         else:
             self.popup_radio.setChecked(True)
+
+        # Load system prompt
+        system_prompt = self.config_manager.get("system_prompt", "")
+        self.system_prompt_edit.setPlainText(system_prompt)
 
     def save_settings(self) -> None:
         """
@@ -203,6 +220,16 @@ class SettingsDialog(QDialog):
             self.config_manager.set("output_mode", "direct_stream")
         else:
             self.config_manager.set("output_mode", "popup")
+
+        # Save system prompt
+        system_prompt = self.system_prompt_edit.toPlainText().strip()
+        if system_prompt:
+            self.config_manager.set("system_prompt", system_prompt)
+        else:
+            # Remove if empty
+            if "system_prompt" in self.config_manager.config:
+                del self.config_manager.config["system_prompt"]
+                self.config_manager.save_config()
 
         self.settings_changed.emit()
         QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")

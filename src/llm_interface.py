@@ -6,6 +6,7 @@ Provides a unified interface for communicating with LLMs, supporting Ollama and 
 
 import json
 import requests
+import time
 from typing import Callable, Optional
 try:
     from openai import OpenAI
@@ -39,6 +40,9 @@ class LLMInterface:
         self.lmstudio_base_url = "http://localhost:1234"  # LM Studio default
         self.config_manager = config_manager
         self.selected_model = "ollama:llama3.2:latest"  # Default model
+        self._cached_models: Optional[list[str]] = None
+        self._models_cache_time: Optional[float] = None
+        self._cache_timeout = 300  # Cache models for 5 minutes
 
         if OPENAI_AVAILABLE and self.config_manager:
             api_key = self.config_manager.get("openai_api_key")
@@ -76,22 +80,27 @@ class LLMInterface:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
         """
+        # Get system prompt from config if available
+        system_prompt = ""
+        if self.config_manager:
+            system_prompt = self.config_manager.get("system_prompt", "")
+
         if self.selected_model.startswith("ollama:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_ollama(prompt, on_chunk, model_name)
+            self.query_ollama(prompt, on_chunk, model_name, system_prompt)
         elif self.selected_model.startswith("openai:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_openai(prompt, on_chunk, model_name)
+            self.query_openai(prompt, on_chunk, model_name, system_prompt)
         elif self.selected_model.startswith("gemini:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_gemini(prompt, on_chunk, model_name)
+            self.query_gemini(prompt, on_chunk, model_name, system_prompt)
         elif self.selected_model.startswith("lmstudio:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_lmstudio(prompt, on_chunk, model_name)
+            self.query_lmstudio(prompt, on_chunk, model_name, system_prompt)
         else:
             on_chunk("Error: Unsupported model type")
 
-    def query_ollama(self, prompt: str, on_chunk: Callable[[str], None], model: str = "llama3.2:latest") -> None:
+    def query_ollama(self, prompt: str, on_chunk: Callable[[str], None], model: str = "llama3.2:latest", system_prompt: str = "") -> None:
         """
         Sends a query to Ollama and streams the response.
 
@@ -99,11 +108,18 @@ class LLMInterface:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): Ollama model name.
+            system_prompt (str): System prompt to customize AI behavior.
         """
         url = f"{self.base_url}/api/generate"
+
+        # Combine system prompt with user prompt if system prompt exists
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
+
         data = {
             "model": model,
-            "prompt": prompt,
+            "prompt": full_prompt,
             "stream": True
         }
 
@@ -126,7 +142,7 @@ class LLMInterface:
             error_msg = f"Error communicating with Ollama: {e}"
             on_chunk(error_msg)
 
-    def query_openai(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
+    def query_openai(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gpt-4", system_prompt: str = "") -> None:
         """
         Sends a query to OpenAI and streams the response.
 
@@ -134,15 +150,22 @@ class LLMInterface:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): OpenAI model name.
+            system_prompt (str): System prompt to customize AI behavior.
         """
         if not self.openai_client:
             on_chunk("Error: OpenAI client not configured. Please set API key in settings.")
             return
 
         try:
+            # Build messages array with system prompt if provided
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
             stream = self.openai_client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 stream=True
             )
 
@@ -154,7 +177,7 @@ class LLMInterface:
             error_msg = f"Error communicating with OpenAI: {e}"
             on_chunk(error_msg)
 
-    def query_gemini(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
+    def query_gemini(self, prompt: str, on_chunk: Callable[[str], None], model: str = "gemini-pro", system_prompt: str = "") -> None:
         """
         Sends a query to Google Gemini and streams the response.
 
@@ -162,13 +185,19 @@ class LLMInterface:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): Gemini model name.
+            system_prompt (str): System prompt to customize AI behavior.
         """
         if not self.gemini_available:
             on_chunk("Error: Gemini client not configured. Please set API key in settings.")
             return
 
         try:
-            gemini_model = genai.GenerativeModel(model)
+            # Create model with system instructions if provided
+            config = {}
+            if system_prompt:
+                config["system_instruction"] = system_prompt
+
+            gemini_model = genai.GenerativeModel(model, generation_config=config)
             response = gemini_model.generate_content(prompt, stream=True)
 
             for chunk in response:
@@ -179,7 +208,7 @@ class LLMInterface:
             error_msg = f"Error communicating with Gemini: {e}"
             on_chunk(error_msg)
 
-    def query_lmstudio(self, prompt: str, on_chunk: Callable[[str], None], model: str = "local-model") -> None:
+    def query_lmstudio(self, prompt: str, on_chunk: Callable[[str], None], model: str = "local-model", system_prompt: str = "") -> None:
         """
         Sends a query to LM Studio and streams the response.
 
@@ -187,13 +216,21 @@ class LLMInterface:
             prompt (str): The text prompt to send to the model.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): LM Studio model name.
+            system_prompt (str): System prompt to customize AI behavior.
         """
         try:
             # Create OpenAI client for LM Studio (OpenAI-compatible API)
             lmstudio_client = OpenAI(base_url=self.lmstudio_base_url + "/v1", api_key="not-needed")
+
+            # Build messages array with system prompt if provided
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
             stream = lmstudio_client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 stream=True
             )
 
@@ -207,16 +244,25 @@ class LLMInterface:
 
     def get_available_models(self) -> list[str]:
         """
-        Returns a list of available models.
+        Returns a list of available models with caching to improve performance.
 
         Returns:
             list[str]: List of model identifiers.
         """
+        current_time = time.time()
+
+        # Return cached models if they're still valid
+        if (self._cached_models is not None and
+            self._models_cache_time is not None and
+            current_time - self._models_cache_time < self._cache_timeout):
+            return self._cached_models.copy()
+
+        # Fetch fresh model list
         models = []
 
         # Fetch Ollama models dynamically
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=2)  # Reduced timeout
             if response.status_code == 200:
                 data = response.json()
                 ollama_models = data.get("models", [])
@@ -231,7 +277,7 @@ class LLMInterface:
 
         # Fetch LM Studio models dynamically
         try:
-            response = requests.get(f"{self.lmstudio_base_url}/v1/models", timeout=5)
+            response = requests.get(f"{self.lmstudio_base_url}/v1/models", timeout=2)  # Reduced timeout
             if response.status_code == 200:
                 data = response.json()
                 lmstudio_models = data.get("data", [])
@@ -247,4 +293,15 @@ class LLMInterface:
         if self.gemini_available:
             models.extend(["gemini:gemini-flash-latest", "gemini:gemini-flash-lite-latest"])
 
+        # Cache the results
+        self._cached_models = models.copy()
+        self._models_cache_time = current_time
+
         return models
+
+    def refresh_models_cache(self) -> None:
+        """
+        Forces a refresh of the cached model list.
+        """
+        self._cached_models = None
+        self._models_cache_time = None

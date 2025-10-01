@@ -29,9 +29,8 @@ class DirectStreamHandler:
     """
     Handles direct text streaming by simulating keyboard input.
 
-    This class accumulates streaming tokens and types them at natural break points
-    (sentence endings, line breaks, or when buffer gets large enough) to avoid
-    garbled output from partial words and tokens.
+    This class accumulates streaming tokens and types them in timed chunks
+    to allow complete words and phrases to form before typing.
     """
 
     def __init__(self) -> None:
@@ -40,11 +39,13 @@ class DirectStreamHandler:
         """
         self.keyboard = Controller()
         self.buffer = ""
+        self.timer: threading.Timer | None = None
         self.lock = threading.Lock()
+        self.last_type_time = time.time()
 
     def stream_token(self, token: str) -> None:
         """
-        Accumulates tokens and types them at natural break points.
+        Accumulates tokens and schedules typing after a delay.
 
         Args:
             token (str): The token to add to the buffer.
@@ -52,37 +53,23 @@ class DirectStreamHandler:
         with self.lock:
             self.buffer += token
 
-            # Check if we should type the buffer now
-            if self._should_type_buffer():
-                self._type_buffer()
+            # Cancel any existing timer
+            if self.timer and self.timer.is_alive():
+                self.timer.cancel()
 
-    def _should_type_buffer(self) -> bool:
-        """
-        Determines if the buffer should be typed based on content analysis.
-
-        Returns:
-            bool: True if buffer should be typed now.
-        """
-        if not self.buffer:
-            return False
-
-        # Type if buffer contains sentence endings
-        if any(char in self.buffer for char in '.!?\n'):
-            return True
-
-        # Type if buffer gets too large (to prevent memory issues)
-        if len(self.buffer) > 200:
-            return True
-
-        return False
+            # Schedule typing after a delay to allow more tokens to accumulate
+            self.timer = threading.Timer(0.8, self._type_buffer)
+            self.timer.start()
 
     def _type_buffer(self) -> None:
         """
         Types the accumulated buffer content and clears it.
         """
-        if self.buffer:
-            self.keyboard.type(self.buffer)
-            self.buffer = ""
+        with self.lock:
+            if self.buffer:
+                self.keyboard.type(self.buffer)
+                self.buffer = ""
+                self.last_type_time = time.time()
 
     def finalize(self) -> None:
         """
@@ -90,4 +77,6 @@ class DirectStreamHandler:
         Should be called when streaming is complete.
         """
         with self.lock:
+            if self.timer and self.timer.is_alive():
+                self.timer.cancel()
             self._type_buffer()
