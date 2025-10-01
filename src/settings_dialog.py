@@ -4,7 +4,7 @@ Settings dialog module for Blink.
 Provides a GUI for configuring API keys and model selection.
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup
 from PyQt6.QtCore import pyqtSignal
 from typing import Optional
 
@@ -77,6 +77,26 @@ class SettingsDialog(QDialog):
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
 
+        # Output Mode section
+        output_group = QGroupBox("Output Mode")
+        output_layout = QVBoxLayout()
+
+        output_layout.addWidget(QLabel("Choose how AI responses are displayed:"))
+
+        # Radio buttons for output mode
+        self.output_mode_group = QButtonGroup()
+        self.popup_radio = QRadioButton("Popup Overlay")
+        self.direct_stream_radio = QRadioButton("Direct Stream")
+
+        self.output_mode_group.addButton(self.popup_radio, 0)
+        self.output_mode_group.addButton(self.direct_stream_radio, 1)
+
+        output_layout.addWidget(self.popup_radio)
+        output_layout.addWidget(self.direct_stream_radio)
+
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
+
         # Buttons
         button_layout = QHBoxLayout()
         save_button = QPushButton("Save")
@@ -106,6 +126,13 @@ class SettingsDialog(QDialog):
         index = self.model_combo.findText(selected_model)
         if index >= 0:
             self.model_combo.setCurrentIndex(index)
+
+        # Load output mode
+        output_mode = self.config_manager.get("output_mode", "popup")
+        if output_mode == "direct_stream":
+            self.direct_stream_radio.setChecked(True)
+        else:
+            self.popup_radio.setChecked(True)
 
     def save_settings(self) -> None:
         """
@@ -170,6 +197,12 @@ class SettingsDialog(QDialog):
 
         self.config_manager.set("selected_model", selected_model)
         self.llm_interface.set_selected_model(selected_model)
+
+        # Save output mode
+        if self.direct_stream_radio.isChecked():
+            self.config_manager.set("output_mode", "direct_stream")
+        else:
+            self.config_manager.set("output_mode", "popup")
 
         self.settings_changed.emit()
         QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")

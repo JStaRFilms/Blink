@@ -28,7 +28,7 @@ def main() -> None:
     text_capturer = TextCapturer()
     llm_interface = LLMInterface(config_manager=config_manager)
     overlay_ui = OverlayUI()
-    hotkey_manager = HotkeyManager(text_capturer, llm_interface, overlay_ui)
+    hotkey_manager = HotkeyManager(text_capturer, llm_interface, overlay_ui, config_manager)
 
     # Load saved model selection
     selected_model = config_manager.get("selected_model", "ollama:llama3.2:latest")

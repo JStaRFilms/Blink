@@ -11,7 +11,7 @@ This report details the successful implementation of all future requirements (FR
 - `src/settings_dialog.py`: GUI dialog for API key and model configuration
 
 ### Existing Files Modified:
-- `requirements.txt`: Added pywinauto, openai, keyboard dependencies
+- `requirements.txt`: Added uiautomation, pywinauto, openai, keyboard dependencies
 - `src/text_capturer.py`: Replaced clipboard hack with Windows UI Automation
 - `src/llm_interface.py`: Added support for OpenAI models and unified query interface
 - `src/overlay_ui.py`: Added "Insert" button and context-aware positioning
@@ -21,8 +21,8 @@ This report details the successful implementation of all future requirements (FR
 ## Future Requirements Implementation Status
 
 ### ✅ FR-008: Robust Text Capture (UI Automation)
-- **Implementation**: `src/text_capturer.py` using pywinauto library
-- **Details**: Direct UI Automation API access for non-destructive text capture, with bounding rectangle retrieval for positioning
+- **Implementation**: `src/text_capturer.py` using uiautomation library with clipboard fallback
+- **Details**: Primary method uses Windows UI Automation API for non-destructive text capture, falls back to clipboard method for maximum compatibility
 - **Status**: Complete
 
 ### ✅ FR-009: Cloud Model Configuration
@@ -68,7 +68,8 @@ The implementation maintains the Modular Architecture while adding new capabilit
 
 ## Technology Stack Additions
 
-- **pywinauto>=0.6.8**: Windows UI Automation for robust text capture
+- **uiautomation>=2.0.29**: Direct Windows UI Automation API for robust text capture
+- **pywinauto>=0.6.8**: Windows GUI automation library
 - **openai>=1.0.0**: OpenAI API integration for cloud models
 - **keyboard>=0.13.5**: Direct keyboard input for text insertion
 - **PyQt6 QSystemTrayIcon**: System tray functionality
@@ -95,7 +96,7 @@ Due to the interactive nature of the GUI application and dependencies on externa
 ## Backward Compatibility
 
 The implementation maintains backward compatibility with MUS features:
-- Clipboard fallback in text capture if UI Automation fails
+- UI Automation as primary method with clipboard fallback for maximum compatibility
 - Ollama remains default and works without additional configuration
 - All existing hotkey and overlay functionality preserved
 

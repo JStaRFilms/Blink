@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from .text_capturer import TextCapturer
     from .llm_interface import LLMInterface
     from .overlay_ui import OverlayUI
+    from .config_manager import ConfigManager
+
+from .output_handler import DirectStreamHandler
 
 
 class HotkeyManager:
@@ -25,7 +28,7 @@ class HotkeyManager:
         listener (keyboard.GlobalHotKeys): The global hotkey listener.
     """
 
-    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface', overlay_ui: 'OverlayUI') -> None:
+    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface', overlay_ui: 'OverlayUI', config_manager: 'ConfigManager') -> None:
         """
         Initializes the HotkeyManager.
 
@@ -33,10 +36,12 @@ class HotkeyManager:
             text_capturer (TextCapturer): Text capturer instance.
             llm_interface (LLMInterface): LLM interface instance.
             overlay_ui (OverlayUI): Overlay UI instance.
+            config_manager (ConfigManager): Configuration manager instance.
         """
         self.text_capturer = text_capturer
         self.llm_interface = llm_interface
         self.overlay_ui = overlay_ui
+        self.config_manager = config_manager
         self.listener = keyboard.GlobalHotKeys({
             '<ctrl>+<shift>+.': self.on_hotkey
         })
@@ -55,20 +60,38 @@ class HotkeyManager:
 
     def process(self) -> None:
         """
-        Processes the hotkey event: captures text, queries LLM, and displays overlay.
+        Processes the hotkey event: captures text, queries LLM, and outputs based on user setting.
         """
         text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
         if not text.strip():
             return  # No text selected
 
-        # Reset and position overlay
-        self.overlay_ui.reset_signal.emit()
-        self.overlay_ui.position_near_selection(selection_rect)
-        self.overlay_ui.show_signal.emit()
+        # Get output mode from config
+        output_mode = self.config_manager.get("output_mode", "popup")
 
-        # Define callback for streaming chunks
-        def on_chunk(chunk: str) -> None:
-            self.overlay_ui.append_signal.emit(chunk)
+        if output_mode == "direct_stream":
+            # Use direct stream handler
+            handler = DirectStreamHandler()
 
-        # Query the LLM with streaming
-        self.llm_interface.query(text, on_chunk)
+            # Define callback for streaming chunks
+            def on_chunk(chunk: str) -> None:
+                handler.stream_token(chunk)
+
+            # Query the LLM with streaming
+            self.llm_interface.query(text, on_chunk)
+
+            # Ensure any remaining buffered text is typed
+            handler.finalize()
+        else:
+            # Use popup overlay (default behavior)
+            # Reset and position overlay
+            self.overlay_ui.reset_signal.emit()
+            self.overlay_ui.position_near_selection(selection_rect)
+            self.overlay_ui.show_signal.emit()
+
+            # Define callback for streaming chunks
+            def on_chunk(chunk: str) -> None:
+                self.overlay_ui.append_signal.emit(chunk)
+
+            # Query the LLM with streaming
+            self.llm_interface.query(text, on_chunk)
