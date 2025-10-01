@@ -79,9 +79,6 @@ class HotkeyManager:
 
             # Query the LLM with streaming
             self.llm_interface.query(text, on_chunk)
-
-            # Ensure any remaining buffered text is typed
-            handler.finalize()
         else:
             # Use popup overlay (default behavior)
             # Reset and position overlay

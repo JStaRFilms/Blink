@@ -29,54 +29,27 @@ class DirectStreamHandler:
     """
     Handles direct text streaming by simulating keyboard input.
 
-    This class accumulates streaming tokens and types them in timed chunks
-    to allow complete words and phrases to form before typing.
+    This class types tokens immediately for real-time response.
     """
 
     def __init__(self) -> None:
         """
-        Initializes the DirectStreamHandler with a keyboard controller and buffer.
+        Initializes the DirectStreamHandler with a keyboard controller.
         """
         self.keyboard = Controller()
-        self.buffer = ""
-        self.timer: threading.Timer | None = None
-        self.lock = threading.Lock()
-        self.last_type_time = time.time()
 
     def stream_token(self, token: str) -> None:
         """
-        Accumulates tokens and schedules typing after a delay.
+        Types the token immediately using the keyboard controller.
 
         Args:
-            token (str): The token to add to the buffer.
+            token (str): The token to type.
         """
-        with self.lock:
-            self.buffer += token
-
-            # Cancel any existing timer
-            if self.timer and self.timer.is_alive():
-                self.timer.cancel()
-
-            # Schedule typing after a delay to allow more tokens to accumulate
-            self.timer = threading.Timer(0.8, self._type_buffer)
-            self.timer.start()
-
-    def _type_buffer(self) -> None:
-        """
-        Types the accumulated buffer content and clears it.
-        """
-        with self.lock:
-            if self.buffer:
-                self.keyboard.type(self.buffer)
-                self.buffer = ""
-                self.last_type_time = time.time()
+        if token:
+            self.keyboard.type(token)
 
     def finalize(self) -> None:
         """
-        Forces typing of any remaining buffered content.
-        Should be called when streaming is complete.
+        No-op for immediate typing implementation.
         """
-        with self.lock:
-            if self.timer and self.timer.is_alive():
-                self.timer.cancel()
-            self._type_buffer()
+        pass
