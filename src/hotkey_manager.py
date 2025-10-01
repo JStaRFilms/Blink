@@ -73,12 +73,18 @@ class HotkeyManager:
             # Use direct stream handler
             handler = DirectStreamHandler()
 
+            # Start the consumer thread
+            handler.start_streaming()
+
             # Define callback for streaming chunks
             def on_chunk(chunk: str) -> None:
                 handler.stream_token(chunk)
 
             # Query the LLM with streaming
             self.llm_interface.query(text, on_chunk)
+
+            # Stop streaming and finalize any remaining buffered text
+            handler.stop_streaming()
         else:
             # Use popup overlay (default behavior)
             # Reset and position overlay
