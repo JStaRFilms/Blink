@@ -1,8 +1,7 @@
 """
 Configuration management module for Blink.
 
-Handles loading and saving user settings. For MUS, this is a placeholder
-with basic structure for future expansion.
+Handles loading and saving user settings, including error recovery options.
 """
 
 import json
@@ -29,6 +28,30 @@ class ConfigManager:
         self.config_file = config_file
         self.config: Dict[str, Any] = {}
         self.load_config()
+        self._ensure_defaults()
+
+    def _ensure_defaults(self) -> None:
+        """
+        Ensures default configuration values exist.
+        """
+        defaults = {
+            "output_mode": "popup",
+            "enable_error_logging": True,
+            "log_to_file": False,
+            "log_file_path": "blink_errors.log",
+            "streaming_timeout": 120,  # seconds
+            "enable_retry": True,
+            "max_retries": 2
+        }
+        
+        changed = False
+        for key, value in defaults.items():
+            if key not in self.config:
+                self.config[key] = value
+                changed = True
+        
+        if changed:
+            self.save_config()
 
     def load_config(self) -> None:
         """

@@ -1,12 +1,14 @@
 """
 Hotkey manager module for Blink.
 
-Responsible for setting up and listening for the global hotkey.
+Responsible for setting up and listening for the global hotkey with error recovery.
+Uses the 'keyboard' library for more reliable hotkey handling on Windows.
 """
 
 import threading
-from pynput import keyboard
-from typing import TYPE_CHECKING
+import keyboard as kb
+import time
+from typing import TYPE_CHECKING, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from .text_capturer import TextCapturer
@@ -14,21 +16,18 @@ if TYPE_CHECKING:
     from .overlay_ui import OverlayUI
     from .config_manager import ConfigManager
 
-from .output_handler import DirectStreamHandler
+from .output_handler import DirectStreamHandler, StreamStatus
+from .error_logger import logger
 
 
 class HotkeyManager:
     """
     Manages the global hotkey listener and triggers the text capture and AI processing flow.
-
-    Attributes:
-        text_capturer (TextCapturer): Instance for capturing selected text.
-        llm_interface (LLMInterface): Instance for querying the LLM.
-        overlay_ui (OverlayUI): Instance of the GUI overlay.
-        listener (keyboard.GlobalHotKeys): The global hotkey listener.
+    Includes error recovery and retry logic.
     """
 
-    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface', overlay_ui: 'OverlayUI', config_manager: 'ConfigManager') -> None:
+    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface', 
+                 overlay_ui: 'OverlayUI', config_manager: 'ConfigManager') -> None:
         """
         Initializes the HotkeyManager.
 
@@ -42,78 +41,266 @@ class HotkeyManager:
         self.llm_interface = llm_interface
         self.overlay_ui = overlay_ui
         self.config_manager = config_manager
+        
+        # Configure logging if enabled
+        if config_manager.get("enable_error_logging", True):
+            if config_manager.get("log_to_file", False):
+                log_path = config_manager.get("log_file_path", "blink_errors.log")
+                logger.configure_file_logging(log_path)
+        
+        # Hotkey state
+        self.hotkey = 'ctrl+alt+.'
         self.is_processing = False
-        self.listener = keyboard.GlobalHotKeys({
-            '<ctrl>+<shift>+.': self.on_hotkey
-        })
+        self.hotkey_registered = False
+        
+        # Track last query for retry
+        self.last_query_text = None
+        self.last_query_rect = None
 
     def start(self) -> None:
-        """
-        Starts the global hotkey listener.
-        """
-        self.listener.start()
+        """Starts the global hotkey listener."""
+        try:
+            # Remove any existing hotkey first to avoid duplicates
+            self.stop()
+            
+            # Register the hotkey
+            kb.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
+            self.hotkey_registered = True
+            logger.info(f"Hotkey listener started ({self.hotkey})")
+        except Exception as e:
+            logger.error(f"Failed to register hotkey: {e}")
+            self.hotkey_registered = False
+
+    def stop(self) -> None:
+        """Stops the hotkey listener."""
+        try:
+            if self.hotkey_registered:
+                kb.remove_hotkey(self.hotkey)
+                self.hotkey_registered = False
+                logger.info("Hotkey listener stopped")
+        except Exception as e:
+            logger.error(f"Error stopping hotkey listener: {e}")
+
+    def cleanup(self) -> None:
+        """Clean up resources."""
+        self.stop()
+        # Ensure all keys are released
+        kb.unhook_all()
+        logger.info("Hotkey manager cleaned up")
 
     def on_hotkey(self) -> None:
-        """
-        Callback for when the hotkey is pressed. Starts the processing asynchronously.
-        """
-        # Prevent concurrent processing
+        """Callback for when the hotkey is pressed."""
         if self.is_processing:
+            logger.debug("Already processing a request, ignoring hotkey")
             return
-
-        self.is_processing = True
-
-        # Use daemon thread so hotkey listener remains responsive for multiple presses
-        process_thread = threading.Thread(target=self.process, daemon=True)
-        process_thread.start()
+            
+        try:
+            self.is_processing = True
+            logger.info(f"HOTKEY TRIGGERED: {self.hotkey}")
+            
+            # Ensure all keys are released before proceeding
+            kb.release('ctrl')
+            kb.release('alt')
+            kb.release('.')
+            
+            # Process in a separate thread to avoid blocking
+            process_thread = threading.Thread(target=self.process, daemon=True)
+            process_thread.start()
+            
+            # Wait a bit before allowing the next hotkey press
+            time.sleep(0.1)
+            
+        except Exception as e:
+            logger.error(f"Error in hotkey handler: {e}")
+        finally:
+            self.is_processing = False
 
     def process(self) -> None:
         """
-        Processes the hotkey event: captures text, queries LLM, and outputs based on user setting.
+        Processes the hotkey event with retry logic if enabled.
         """
-        text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
-        if not text.strip():
-            return  # No text selected
+        try:
+            # Add a small delay to ensure the keys are released and selection is maintained
+            time.sleep(0.2)
+            
+            # Get config first
+            output_mode = self.config_manager.get("output_mode", "popup")
+            enable_retry = self.config_manager.get("enable_retry", True)
+            max_retries = self.config_manager.get("max_retries", 2)
+            
+            attempt = 0
+            success = False
+            
+            while attempt <= max_retries and not success:
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt} of {max_retries}")
+                    # Add a bit more delay between retries
+                    time.sleep(0.3)
+                
+                try:
+                    # Capture text
+                    logger.debug("Attempting to capture selected text...")
+                    text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
+                    
+                    if not text or not text.strip():
+                        logger.warning(f"No text selected (attempt {attempt + 1}/{max_retries + 1})")
+                        attempt += 1
+                        continue
+                        
+                    logger.debug(f"Captured text: {text[:50]}..." if len(text) > 50 else f"Captured text: {text}")
+                    
+                    # Store for potential retry
+                    self.last_query_text = text
+                    self.last_query_rect = selection_rect
+                    
+                    # Process the query
+                    success = self._process_query(text, selection_rect, output_mode, attempt)
+                    if not success and enable_retry:
+                        logger.info(f"Query processing failed, will retry if attempts remain")
+                    
+                except Exception as e:
+                    logger.error(f"Error during text capture (attempt {attempt + 1}): {e}")
+                    success = False
+                
+                attempt += 1
+                
+            if not success:
+                logger.error("Failed to process text after all retry attempts")
+                self.overlay_ui.show_error("Failed to process selected text. Please try again.")
+                
+        except Exception as e:
+            logger.error(f"Unexpected error in process: {e}")
+            self.overlay_ui.show_error("An unexpected error occurred. Please check the logs.")
+            
+        finally:
+            # Ensure we don't leave any keys stuck
+            kb.release('ctrl')
+            kb.release('alt')
+            kb.release('.')
+            self.is_processing = False
+            
+            # Reset overlay UI state
+            try:
+                self.overlay_ui.reset_signal.emit()
+                if 'selection_rect' in locals() and selection_rect is not None:
+                    self.overlay_ui.position_near_selection(selection_rect)
+                    self.overlay_ui.show_signal.emit()
+                    self.overlay_ui.append_signal.emit(
+                        "❌ An error occurred. Check console for details."
+                    )
+            except Exception as e:
+                logger.error(f"Error cleaning up overlay UI: {e}")
 
-        # Get output mode from config
-        output_mode = self.config_manager.get("output_mode", "popup")
+    def _process_query(self, text: str, selection_rect, output_mode: str, attempt: int) -> bool:
+        """
+        Processes a single query attempt.
+        
+        Returns:
+            bool: True if successful, False if error occurred.
+        """
+        preview = text[:50] + "..." if len(text) > 50 else text
+        logger.streaming_started(preview)
 
         if output_mode == "direct_stream":
-            # Use direct stream handler with proper completion signaling
-            handler = DirectStreamHandler()
-
-            # Start the consumer thread (non-daemon so it prevents premature exit)
-            handler.start_streaming()
-
-            # Define callback for streaming chunks
-            def on_chunk(chunk: str) -> None:
-                handler.stream_token(chunk)
-
-            # Query the LLM with streaming
-            self.llm_interface.query(text, on_chunk)
-
-            # CRITICAL FIX: Signal completion AFTER query() returns
-            # This ensures the consumer processes all queued tokens before stopping
-            handler.stream_token(None)  # Send sentinel to signal "stream complete"
-
-            # Note: We don't wait for completion here to keep hotkey responsive
-            # The DirectStreamHandler will handle completion asynchronously
-
-            # Reset processing flag when done
-            self.is_processing = False
+            return self._process_direct_stream(text, attempt)
         else:
-            # Use popup overlay (default behavior)
-            # Reset and position overlay
+            return self._process_popup(text, selection_rect)
+
+    def _process_direct_stream(self, text: str, attempt: int) -> bool:
+        """
+        Processes query in direct stream mode with error handling.
+        
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        timeout = self.config_manager.get("streaming_timeout", 120)
+        
+        # Error callback for notifications
+        def on_error(error_type: str, message: str) -> None:
+            logger.streaming_error(error_type, message)
+        
+        handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
+        handler.start_streaming()
+
+        # Define streaming callback
+        def on_chunk(chunk: str) -> None:
+            handler.stream_token(chunk)
+
+        try:
+            # Query LLM
+            self.llm_interface.query(text, on_chunk)
+            
+            # Signal completion
+            handler.stream_token(None)
+            
+            # Wait for processing
+            final_status = handler.wait_for_completion()
+            
+            # Check if successful
+            if final_status == StreamStatus.COMPLETE:
+                return True
+            else:
+                error_msg = handler.get_error_message()
+                logger.error(f"Stream failed with status {final_status.value}: {error_msg}")
+                return False
+                
+        except Exception as e:
+            logger.streaming_error("llm_query_error", str(e))
+            handler.stop_streaming()
+            return False
+
+    def _process_popup(self, text: str, selection_rect) -> bool:
+        """
+        Processes query in popup mode.
+        
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            # Setup overlay
             self.overlay_ui.reset_signal.emit()
             self.overlay_ui.position_near_selection(selection_rect)
             self.overlay_ui.show_signal.emit()
 
-            # Define callback for streaming chunks
+            # Track if any data received
+            received_data = False
+
+            # Define streaming callback
             def on_chunk(chunk: str) -> None:
+                nonlocal received_data
+                received_data = True
                 self.overlay_ui.append_signal.emit(chunk)
 
-            # Query the LLM with streaming
+            # Query LLM
             self.llm_interface.query(text, on_chunk)
+            
+            # Check if we got any response
+            if not received_data:
+                logger.warning("No data received from LLM")
+                self.overlay_ui.append_signal.emit(
+                    "\n\n❌ Error: No response from LLM. Check your connection."
+                )
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.streaming_error("popup_error", str(e))
+            try:
+                self.overlay_ui.append_signal.emit(f"\n\n❌ Error: {str(e)}")
+            except Exception:
+                pass
+            return False
 
-            # Reset processing flag when done
-            self.is_processing = False
+    def retry_last_query(self) -> None:
+        """
+        Manually retry the last query. Can be bound to a hotkey or menu item.
+        """
+        if self.last_query_text:
+            logger.info("Manual retry triggered")
+            text = self.last_query_text
+            rect = self.last_query_rect
+            output_mode = self.config_manager.get("output_mode", "popup")
+            self._process_query(text, rect, output_mode, attempt=0)
+        else:
+            logger.warning("No previous query to retry")
