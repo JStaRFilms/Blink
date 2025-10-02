@@ -42,6 +42,7 @@ class HotkeyManager:
         self.llm_interface = llm_interface
         self.overlay_ui = overlay_ui
         self.config_manager = config_manager
+        self.is_processing = False
         self.listener = keyboard.GlobalHotKeys({
             '<ctrl>+<shift>+.': self.on_hotkey
         })
@@ -54,12 +55,17 @@ class HotkeyManager:
 
     def on_hotkey(self) -> None:
         """
-        Callback for when the hotkey is pressed. Starts the processing and waits for completion.
+        Callback for when the hotkey is pressed. Starts the processing asynchronously.
         """
-        # Use non-daemon thread so the main process waits for streaming to complete
-        process_thread = threading.Thread(target=self.process, daemon=False)
+        # Prevent concurrent processing
+        if self.is_processing:
+            return
+
+        self.is_processing = True
+
+        # Use daemon thread so hotkey listener remains responsive for multiple presses
+        process_thread = threading.Thread(target=self.process, daemon=True)
         process_thread.start()
-        process_thread.join()  # Wait for the streaming process to complete
 
     def process(self) -> None:
         """
@@ -89,9 +95,12 @@ class HotkeyManager:
             # CRITICAL FIX: Signal completion AFTER query() returns
             # This ensures the consumer processes all queued tokens before stopping
             handler.stream_token(None)  # Send sentinel to signal "stream complete"
-            
-            # Wait for the consumer to finish processing everything
-            handler.wait_for_completion()
+
+            # Note: We don't wait for completion here to keep hotkey responsive
+            # The DirectStreamHandler will handle completion asynchronously
+
+            # Reset processing flag when done
+            self.is_processing = False
         else:
             # Use popup overlay (default behavior)
             # Reset and position overlay
@@ -105,3 +114,6 @@ class HotkeyManager:
 
             # Query the LLM with streaming
             self.llm_interface.query(text, on_chunk)
+
+            # Reset processing flag when done
+            self.is_processing = False

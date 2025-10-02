@@ -20,6 +20,7 @@ def main() -> None:
     Main function to start the Blink application.
     """
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # Keep app running even when windows close
 
     # Initialize config manager
     config_manager = ConfigManager()
