@@ -1,10 +1,10 @@
 """
 Settings dialog module for Blink.
 
-Provides a GUI for configuring API keys and model selection.
+Provides a centralized GUI for configuring all application options.
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup, QTextEdit
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QTabWidget, QCheckBox, QWidget
 from PyQt6.QtCore import pyqtSignal
 from typing import Optional
 
@@ -38,8 +38,83 @@ class SettingsDialog(QDialog):
 
     def setup_ui(self) -> None:
         """
-        Sets up the user interface components.
+        Sets up the user interface components with tabs.
         """
+        layout = QVBoxLayout()
+
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # General tab
+        self.setup_general_tab()
+
+        # Models tab
+        self.setup_models_tab()
+
+        # Prompts tab
+        self.setup_prompts_tab()
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self.save_settings)
+        button_layout.addWidget(save_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def setup_general_tab(self) -> None:
+        """
+        Sets up the General tab with output mode and startup options.
+        """
+        general_widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Output Mode section
+        output_group = QGroupBox("Output Mode")
+        output_layout = QVBoxLayout()
+
+        output_layout.addWidget(QLabel("Choose how AI responses are displayed:"))
+
+        # Radio buttons for output mode
+        self.output_mode_group = QButtonGroup()
+        self.popup_radio = QRadioButton("Popup Overlay")
+        self.direct_stream_radio = QRadioButton("Direct Stream")
+
+        self.output_mode_group.addButton(self.popup_radio, 0)
+        self.output_mode_group.addButton(self.direct_stream_radio, 1)
+
+        output_layout.addWidget(self.popup_radio)
+        output_layout.addWidget(self.direct_stream_radio)
+
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
+
+        # Startup section
+        startup_group = QGroupBox("System Integration")
+        startup_layout = QVBoxLayout()
+
+        self.startup_checkbox = QCheckBox("Launch on system startup")
+        self.startup_checkbox.stateChanged.connect(self.on_startup_checkbox_changed)
+        startup_layout.addWidget(self.startup_checkbox)
+
+        startup_group.setLayout(startup_layout)
+        layout.addWidget(startup_group)
+
+        layout.addStretch()  # Push content to top
+        general_widget.setLayout(layout)
+        self.tab_widget.addTab(general_widget, "General")
+
+    def setup_models_tab(self) -> None:
+        """
+        Sets up the Models tab with API keys and model selection.
+        """
+        models_widget = QWidget()
         layout = QVBoxLayout()
 
         # API Keys section
@@ -77,25 +152,16 @@ class SettingsDialog(QDialog):
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
 
-        # Output Mode section
-        output_group = QGroupBox("Output Mode")
-        output_layout = QVBoxLayout()
+        layout.addStretch()  # Push content to top
+        models_widget.setLayout(layout)
+        self.tab_widget.addTab(models_widget, "Models")
 
-        output_layout.addWidget(QLabel("Choose how AI responses are displayed:"))
-
-        # Radio buttons for output mode
-        self.output_mode_group = QButtonGroup()
-        self.popup_radio = QRadioButton("Popup Overlay")
-        self.direct_stream_radio = QRadioButton("Direct Stream")
-
-        self.output_mode_group.addButton(self.popup_radio, 0)
-        self.output_mode_group.addButton(self.direct_stream_radio, 1)
-
-        output_layout.addWidget(self.popup_radio)
-        output_layout.addWidget(self.direct_stream_radio)
-
-        output_group.setLayout(output_layout)
-        layout.addWidget(output_group)
+    def setup_prompts_tab(self) -> None:
+        """
+        Sets up the Prompts tab with system prompt configuration.
+        """
+        prompts_widget = QWidget()
+        layout = QVBoxLayout()
 
         # System Prompt section
         prompt_group = QGroupBox("AI System Prompt")
@@ -104,24 +170,15 @@ class SettingsDialog(QDialog):
         prompt_layout.addWidget(QLabel("Customize AI behavior (optional):"))
         self.system_prompt_edit = QTextEdit()
         self.system_prompt_edit.setPlaceholderText("Enter system prompt to customize AI responses...")
-        self.system_prompt_edit.setMaximumHeight(100)
+        self.system_prompt_edit.setMinimumHeight(150)
         prompt_layout.addWidget(self.system_prompt_edit)
 
         prompt_group.setLayout(prompt_layout)
         layout.addWidget(prompt_group)
 
-        # Buttons
-        button_layout = QHBoxLayout()
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.save_settings)
-        button_layout.addWidget(save_button)
-
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_button)
-
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
+        layout.addStretch()  # Push content to top
+        prompts_widget.setLayout(layout)
+        self.tab_widget.addTab(prompts_widget, "Prompts")
 
     def load_settings(self) -> None:
         """
@@ -150,6 +207,15 @@ class SettingsDialog(QDialog):
         # Load system prompt
         system_prompt = self.config_manager.get("system_prompt", "")
         self.system_prompt_edit.setPlainText(system_prompt)
+
+        # Load startup setting
+        try:
+            from .startup_manager import StartupManager
+            startup_manager = StartupManager()
+            self.startup_checkbox.setChecked(startup_manager.is_enabled())
+        except ImportError:
+            self.startup_checkbox.setChecked(False)
+            self.startup_checkbox.setEnabled(False)
 
     def save_settings(self) -> None:
         """
@@ -234,3 +300,22 @@ class SettingsDialog(QDialog):
         self.settings_changed.emit()
         QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")
         self.accept()
+
+    def on_startup_checkbox_changed(self, state: int) -> None:
+        """
+        Handles the startup checkbox state change.
+
+        Args:
+            state: Checkbox state (2=checked, 0=unchecked)
+        """
+        try:
+            from .startup_manager import StartupManager
+            startup_manager = StartupManager()
+            if state == 2:  # Checked
+                startup_manager.enable()
+            else:  # Unchecked
+                startup_manager.disable()
+        except ImportError:
+            QMessageBox.warning(self, "Warning", "Startup manager not available. Please ensure pywin32 is installed.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to update startup setting: {e}")

@@ -21,6 +21,21 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 
+class LLMConnectionError(Exception):
+    """Raised when unable to connect to an LLM service."""
+    pass
+
+
+class LLMAuthError(Exception):
+    """Raised when authentication fails with an LLM service."""
+    pass
+
+
+class LLMConfigError(Exception):
+    """Raised when LLM configuration is invalid."""
+    pass
+
+
 class LLMInterface:
     """
     Interface for interacting with Large Language Models.
@@ -113,7 +128,7 @@ class LLMInterface:
         }
 
         try:
-            response = requests.post(url, json=data, stream=True)
+            response = requests.post(url, json=data, stream=True, timeout=10)
             response.raise_for_status()
 
             for line in response.iter_lines():
@@ -127,9 +142,17 @@ class LLMInterface:
                     except json.JSONDecodeError:
                         continue  # Skip malformed lines
 
+        except requests.exceptions.ConnectionError:
+            raise LLMConnectionError("Could not connect to Ollama server. Please ensure Ollama is running.")
+        except requests.exceptions.Timeout:
+            raise LLMConnectionError("Connection to Ollama server timed out.")
+        except requests.HTTPError as e:
+            if e.response.status_code == 401:
+                raise LLMAuthError("Authentication failed with Ollama server.")
+            else:
+                raise LLMConnectionError(f"Ollama server error: {e.response.status_code}")
         except requests.RequestException as e:
-            error_msg = f"Error communicating with Ollama: {e}"
-            on_chunk(error_msg)
+            raise LLMConnectionError(f"Network error communicating with Ollama: {e}")
 
     def query_openai(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
         """
@@ -141,8 +164,7 @@ class LLMInterface:
             model (str): OpenAI model name.
         """
         if not self.openai_client:
-            on_chunk("Error: OpenAI client not configured. Please set API key in settings.")
-            return
+            raise LLMConfigError("OpenAI client not configured. Please set API key in settings.")
 
         try:
             stream = self.openai_client.chat.completions.create(
@@ -156,8 +178,12 @@ class LLMInterface:
                     on_chunk(chunk.choices[0].delta.content)
 
         except Exception as e:
-            error_msg = f"Error communicating with OpenAI: {e}"
-            on_chunk(error_msg)
+            # Check for authentication errors
+            error_str = str(e).lower()
+            if "authentication" in error_str or "api key" in error_str or "unauthorized" in error_str:
+                raise LLMAuthError("Invalid OpenAI API key. Please check your settings.")
+            else:
+                raise LLMConnectionError(f"Error communicating with OpenAI: {e}")
 
     def query_gemini(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
         """

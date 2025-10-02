@@ -9,6 +9,7 @@ import threading
 import keyboard as kb
 import time
 from typing import TYPE_CHECKING
+from PyQt6.QtWidgets import QSystemTrayIcon
 
 if TYPE_CHECKING:
     from .text_capturer import TextCapturer
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 from .output_handler import DirectStreamHandler, StreamStatus
 from .error_logger import logger
 from .history_manager import get_conversation_history
+from .llm_interface import LLMConnectionError, LLMAuthError, LLMConfigError
 
 
 class HotkeyManager:
@@ -27,8 +29,8 @@ class HotkeyManager:
     Includes error recovery and retry logic.
     """
 
-    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface', 
-                 overlay_ui: 'OverlayUI', config_manager: 'ConfigManager') -> None:
+    def __init__(self, text_capturer: 'TextCapturer', llm_interface: 'LLMInterface',
+                 overlay_ui: 'OverlayUI', config_manager: 'ConfigManager', system_tray=None) -> None:
         """
         Initializes the HotkeyManager.
         """
@@ -36,6 +38,7 @@ class HotkeyManager:
         self.llm_interface = llm_interface
         self.overlay_ui = overlay_ui
         self.config_manager = config_manager
+        self.system_tray = system_tray
         
         # Configure logging if enabled
         if config_manager.get("enable_error_logging", True):
@@ -465,6 +468,39 @@ Apply the instruction to the following text content:
             logger.info("Popup streaming completed successfully")
             return True
 
+        except LLMConnectionError as e:
+            error_msg = str(e)
+            logger.streaming_error("llm_connection_error", error_msg)
+            try:
+                self.overlay_ui.append_signal.emit(f"\n\n❌ Connection Error: {error_msg}")
+            except Exception:
+                pass
+            # Show system tray notification
+            if self.system_tray:
+                self.system_tray.show_message("Blink - Connection Error", error_msg, QSystemTrayIcon.MessageIcon.Warning)
+            return False
+        except LLMAuthError as e:
+            error_msg = str(e)
+            logger.streaming_error("llm_auth_error", error_msg)
+            try:
+                self.overlay_ui.append_signal.emit(f"\n\n❌ Authentication Error: {error_msg}")
+            except Exception:
+                pass
+            # Show system tray notification
+            if self.system_tray:
+                self.system_tray.show_message("Blink - Authentication Error", error_msg, QSystemTrayIcon.MessageIcon.Warning)
+            return False
+        except LLMConfigError as e:
+            error_msg = str(e)
+            logger.streaming_error("llm_config_error", error_msg)
+            try:
+                self.overlay_ui.append_signal.emit(f"\n\n❌ Configuration Error: {error_msg}")
+            except Exception:
+                pass
+            # Show system tray notification
+            if self.system_tray:
+                self.system_tray.show_message("Blink - Configuration Error", error_msg, QSystemTrayIcon.MessageIcon.Warning)
+            return False
         except Exception as e:
             logger.streaming_error("popup_error", str(e))
             try:

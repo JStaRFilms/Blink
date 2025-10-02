@@ -12,6 +12,9 @@ Blink is a Windows application that allows users to quickly capture selected tex
 - **Streaming GUI Overlay**: Displays AI responses in real-time in a frameless window.
 - **System Tray Controls**: Access settings and memory controls via the system tray icon.
 - **Memory Management**: Enable/disable memory, adjust history length (5-200 messages), and clear history.
+- **Centralized Settings Window**: Comprehensive tabbed settings interface for all configuration options.
+- **Graceful Error Handling**: Non-blocking system tray notifications for connection, authentication, and configuration errors.
+- **System Startup Integration**: Option to automatically launch the application when Windows starts.
 
 ## Requirements
 
@@ -78,14 +81,29 @@ Right-click the system tray icon to access memory settings:
 
 Memory maintains context across queries, allowing natural follow-up conversations like "make it shorter" or "explain that in simple terms".
 
-### Customizing AI Behavior
+### Settings and Configuration
 
-Access the settings dialog from the system tray to customize the AI's behavior:
-- **System Prompt**: Define a custom system prompt to tailor the AI's personality, tone, and response format
+Access the comprehensive settings window from the system tray icon. The settings are organized in three tabs:
+
+#### General Tab
+- **Output Mode**: Choose between "Popup Overlay" (displays responses in a window) or "Direct Stream" (types responses directly into your active application)
+- **System Startup**: Enable/disable automatic launch when Windows starts (requires administrator privileges for Registry access)
+
+#### Models Tab
+- **API Keys**: Securely store API keys for OpenAI and Google Gemini
 - **Model Selection**: Choose from available AI models (Ollama, OpenAI, Gemini, LM Studio)
-- **Output Mode**: Switch between popup overlay and direct streaming modes
 
-The system prompt is automatically prepended to every conversation, allowing you to create specialized AI assistants for different tasks.
+#### Prompts Tab
+- **System Prompt**: Define a custom system prompt to tailor the AI's personality, tone, and response format
+
+### Error Handling
+
+Blink includes robust error handling with user-friendly notifications:
+- **Connection Errors**: Notified when Ollama or cloud services are unreachable
+- **Authentication Errors**: Alerted when API keys are invalid
+- **Configuration Errors**: Guided when settings need adjustment
+
+All errors are displayed as non-blocking system tray notifications, ensuring the application never crashes unexpectedly.
 
 ## Project Structure
 
@@ -104,6 +122,7 @@ Blink/
 │   ├── output_handler.py
 │   ├── overlay_ui.py
 │   ├── settings_dialog.py
+│   ├── startup_manager.py
 │   ├── system_tray.py
 │   └── text_capturer.py
 ├── main.py
@@ -121,6 +140,8 @@ The application follows a modular architecture with separate concerns:
 - `overlay_ui.py`: GUI overlay management
 - `history_manager.py`: Conversational memory management
 - `system_tray.py`: System tray icon and menu controls
+- `settings_dialog.py`: Centralized settings window with tabbed interface
+- `startup_manager.py`: Windows Registry operations for system startup integration
 - `config_manager.py`: Configuration persistence and settings
 - `error_logger.py`: Error logging and debugging utilities
 

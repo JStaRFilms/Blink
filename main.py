@@ -29,7 +29,6 @@ def main() -> None:
     text_capturer = TextCapturer()
     llm_interface = LLMInterface(config_manager=config_manager)
     overlay_ui = OverlayUI()
-    hotkey_manager = HotkeyManager(text_capturer, llm_interface, overlay_ui, config_manager)
 
     # Load saved model selection
     selected_model = config_manager.get("selected_model", "ollama:llama3.2:latest")
@@ -48,6 +47,9 @@ def main() -> None:
 
     system_tray.settings_requested.connect(show_settings)
     system_tray.quit_requested.connect(quit_app)
+
+    # Initialize hotkey manager with system tray reference
+    hotkey_manager = HotkeyManager(text_capturer, llm_interface, overlay_ui, config_manager, system_tray)
 
     # Start the hotkey listener
     hotkey_manager.start()
