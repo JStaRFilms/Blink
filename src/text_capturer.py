@@ -34,6 +34,21 @@ class TextCapturer:
         text, _ = self.capture_selected_text_with_rect()
         return text
 
+    def get_clipboard_content(self) -> str:
+        """
+        Gets the current content of the system clipboard.
+
+        Returns:
+            str: The clipboard content, or empty string if clipboard is empty or contains non-text data.
+        """
+        try:
+            import pyperclip
+            content = pyperclip.paste()
+            return content if content else ""
+        except Exception:
+            # If pyperclip fails or clipboard contains non-text data
+            return ""
+
     def capture_selected_text_with_rect(self) -> Tuple[str, Optional['QRect']]:
         """
         Captures the currently selected text using Windows UI Automation API.

@@ -44,8 +44,10 @@ class HotkeyManager:
         
         # Hotkey state
         self.hotkey = 'ctrl+alt+.'
+        self.clipboard_context_hotkey = self.config_manager.get("clipboard_context_hotkey", "ctrl+alt+/")
         self.is_processing = False
         self.hotkey_registered = False
+        self.clipboard_context_hotkey_registered = False
         
         # Track last query for retry
         self.last_query_text = None
@@ -57,10 +59,13 @@ class HotkeyManager:
             self.stop()
             kb.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
             self.hotkey_registered = True
-            logger.info(f"Hotkey listener started ({self.hotkey})")
+            kb.add_hotkey(self.clipboard_context_hotkey, self.on_clipboard_context_hotkey, suppress=True)
+            self.clipboard_context_hotkey_registered = True
+            logger.info(f"Hotkey listeners started ({self.hotkey}, {self.clipboard_context_hotkey})")
         except Exception as e:
             logger.error(f"Failed to register hotkey: {e}")
             self.hotkey_registered = False
+            self.clipboard_context_hotkey_registered = False
 
     def stop(self) -> None:
         """Stops the hotkey listener."""
@@ -68,7 +73,10 @@ class HotkeyManager:
             if self.hotkey_registered:
                 kb.remove_hotkey(self.hotkey)
                 self.hotkey_registered = False
-                logger.info("Hotkey listener stopped")
+            if self.clipboard_context_hotkey_registered:
+                kb.remove_hotkey(self.clipboard_context_hotkey)
+                self.clipboard_context_hotkey_registered = False
+            logger.info("Hotkey listeners stopped")
         except Exception as e:
             logger.error(f"Error stopping hotkey listener: {e}")
 
@@ -104,6 +112,110 @@ class HotkeyManager:
             logger.error(f"Error in hotkey handler: {e}")
         finally:
             self.is_processing = False
+
+    def on_clipboard_context_hotkey(self) -> None:
+        """Callback for when the clipboard context hotkey is pressed."""
+        if self.is_processing:
+            logger.debug("Already processing a request, ignoring clipboard context hotkey")
+            return
+
+        try:
+            self.is_processing = True
+            logger.info(f"CLIPBOARD CONTEXT HOTKEY TRIGGERED: {self.clipboard_context_hotkey}")
+
+            # Ensure all keys are released before proceeding
+            kb.release('ctrl')
+            kb.release('alt')
+            kb.release('/')
+
+            # Process in a separate thread to avoid blocking
+            process_thread = threading.Thread(target=self.process_clipboard_context, daemon=True)
+            process_thread.start()
+
+            # Wait a bit before allowing the next hotkey press
+            time.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"Error in clipboard context hotkey handler: {e}")
+        finally:
+            self.is_processing = False
+
+    def process_clipboard_context(self) -> None:
+        """
+        Processes the clipboard context hotkey event.
+        """
+        try:
+            # Add a small delay to ensure keys are released
+            time.sleep(0.2)
+
+            # Get config
+            output_mode = self.config_manager.get("output_mode", "popup")
+
+            # Get clipboard content
+            clipboard_content = self.text_capturer.get_clipboard_content()
+            if not clipboard_content or not clipboard_content.strip():
+                logger.warning("Clipboard is empty, cannot process clipboard context")
+                if output_mode == "popup":
+                    try:
+                        self.overlay_ui.reset_signal.emit()
+                        self.overlay_ui.show_signal.emit()
+                        self.overlay_ui.append_signal.emit("❌ Clipboard is empty. Please copy some text first.")
+                    except Exception as e:
+                        logger.error(f"Error showing clipboard empty message: {e}")
+                return
+
+            # Get selected instruction text
+            selected_instruction = self.text_capturer.capture_selected_text()
+            if not selected_instruction or not selected_instruction.strip():
+                logger.warning("No instruction text selected, cannot process clipboard context")
+                if output_mode == "popup":
+                    try:
+                        self.overlay_ui.reset_signal.emit()
+                        self.overlay_ui.show_signal.emit()
+                        self.overlay_ui.append_signal.emit("❌ No instruction selected. Please select some text to use as the instruction.")
+                    except Exception as e:
+                        logger.error(f"Error showing no instruction message: {e}")
+                return
+
+            # Format the final prompt
+            final_prompt = f"""
+Please execute the following instruction:
+---
+{selected_instruction}
+---
+
+Apply the instruction to the following text content:
+---
+{clipboard_content}
+---
+"""
+
+            logger.debug(f"Clipboard context prompt formatted: {final_prompt[:100]}...")
+
+            # Process the query using existing logic
+            success = self._process_clipboard_context_query(final_prompt, output_mode)
+
+            if not success:
+                logger.error("Failed to process clipboard context query")
+                if output_mode == "popup":
+                    try:
+                        self.overlay_ui.reset_signal.emit()
+                        self.overlay_ui.show_signal.emit()
+                        self.overlay_ui.append_signal.emit(
+                            "❌ Failed to process clipboard context.\n"
+                            "Check console for details."
+                        )
+                    except Exception as e:
+                        logger.error(f"Error showing error message: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error in process_clipboard_context: {e}")
+
+        finally:
+            # Ensure keys are released
+            kb.release('ctrl')
+            kb.release('alt')
+            kb.release('/')
 
     def process(self) -> None:
         """
@@ -194,6 +306,21 @@ class HotkeyManager:
         else:
             return self._process_popup(text, selection_rect)
 
+    def _process_clipboard_context_query(self, text: str, output_mode: str) -> bool:
+        """
+        Processes a clipboard context query.
+
+        Returns:
+            bool: True if successful, False if error occurred.
+        """
+        preview = text[:50] + "..." if len(text) > 50 else text
+        logger.streaming_started(f"Clipboard Context: {preview}")
+
+        if output_mode == "direct_stream":
+            return self._process_clipboard_direct_stream(text)
+        else:
+            return self._process_clipboard_popup(text)
+
     def _process_direct_stream(self, text: str, attempt: int) -> bool:
         """
         Processes query in direct stream mode with error handling.
@@ -268,6 +395,85 @@ class HotkeyManager:
             
         except Exception as e:
             logger.streaming_error("popup_error", str(e))
+            try:
+                self.overlay_ui.append_signal.emit(f"\n\n❌ Error: {str(e)}")
+            except Exception:
+                pass
+            return False
+
+    def _process_clipboard_direct_stream(self, text: str) -> bool:
+        """
+        Processes clipboard context query in direct stream mode with error handling.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        timeout = self.config_manager.get("streaming_timeout", 120)
+
+        def on_error(error_type: str, message: str) -> None:
+            logger.streaming_error(error_type, message)
+
+        handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
+        handler.start_streaming()
+
+        def on_chunk(chunk: str) -> None:
+            handler.stream_token(chunk)
+
+        try:
+            self.llm_interface.query(text, on_chunk)
+            handler.stream_token(None)
+            final_status = handler.wait_for_completion()
+
+            if final_status == StreamStatus.COMPLETE:
+                return True
+            else:
+                error_msg = handler.get_error_message()
+                logger.error(f"Clipboard context stream failed with status {final_status.value}: {error_msg}")
+                return False
+
+        except Exception as e:
+            logger.streaming_error("clipboard_context_llm_query_error", str(e))
+            handler.stop_streaming()
+            return False
+
+    def _process_clipboard_popup(self, text: str) -> bool:
+        """
+        Processes clipboard context query in popup mode.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            # Setup overlay ONCE at the start
+            self.overlay_ui.reset_signal.emit()
+            self.overlay_ui.show_signal.emit()
+
+            # Track if any data received
+            received_data = False
+
+            # Define streaming callback
+            def on_chunk(chunk: str) -> None:
+                nonlocal received_data
+                received_data = True
+                self.overlay_ui.append_signal.emit(chunk)
+
+            # Query LLM (this blocks until streaming is complete)
+            self.llm_interface.query(text, on_chunk)
+
+            # Check if we got any response
+            if not received_data:
+                logger.warning("No data received from LLM for clipboard context")
+                self.overlay_ui.append_signal.emit(
+                    "\n\n❌ Error: No response from LLM. Check your connection."
+                )
+                return False
+
+            # Success! The overlay stays open with the streamed text
+            logger.info("Clipboard context popup streaming completed successfully")
+            return True
+
+        except Exception as e:
+            logger.streaming_error("clipboard_context_popup_error", str(e))
             try:
                 self.overlay_ui.append_signal.emit(f"\n\n❌ Error: {str(e)}")
             except Exception:

@@ -41,7 +41,8 @@ class ConfigManager:
             "log_file_path": "blink_errors.log",
             "streaming_timeout": 120,  # seconds
             "enable_retry": True,
-            "max_retries": 2
+            "max_retries": 2,
+            "clipboard_context_hotkey": "ctrl+alt+/"
         }
         
         changed = False
