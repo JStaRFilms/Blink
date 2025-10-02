@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from .output_handler import DirectStreamHandler, StreamStatus
 from .error_logger import logger
+from .history_manager import get_conversation_history
 
 
 class HotkeyManager:
@@ -294,17 +295,31 @@ Apply the instruction to the following text content:
     def _process_query(self, text: str, selection_rect, output_mode: str, attempt: int) -> bool:
         """
         Processes a single query attempt.
-        
+
         Returns:
             bool: True if successful, False if error occurred.
         """
         preview = text[:50] + "..." if len(text) > 50 else text
         logger.streaming_started(preview)
 
-        if output_mode == "direct_stream":
-            return self._process_direct_stream(text, attempt)
+        # Get conversation history if memory is enabled
+        memory_enabled = self.config_manager.get("memory_enabled", True)
+        if memory_enabled:
+            history_manager = get_conversation_history(self.config_manager)
+            current_history = history_manager.get_history()
         else:
-            return self._process_popup(text, selection_rect)
+            current_history = []
+
+        # Create new user message
+        new_message = {"role": "user", "content": text}
+
+        # Combine history with new message
+        messages_to_send = current_history + [new_message]
+
+        if output_mode == "direct_stream":
+            return self._process_direct_stream(messages_to_send, text, attempt)
+        else:
+            return self._process_popup(messages_to_send, text, selection_rect)
 
     def _process_clipboard_context_query(self, text: str, output_mode: str) -> bool:
         """
@@ -321,45 +336,55 @@ Apply the instruction to the following text content:
         else:
             return self._process_clipboard_popup(text)
 
-    def _process_direct_stream(self, text: str, attempt: int) -> bool:
+    def _process_direct_stream(self, messages: list[dict[str, str]], user_text: str, attempt: int) -> bool:
         """
         Processes query in direct stream mode with error handling.
-        
+
         Returns:
             bool: True if successful, False otherwise.
         """
         timeout = self.config_manager.get("streaming_timeout", 120)
-        
+
         def on_error(error_type: str, message: str) -> None:
             logger.streaming_error(error_type, message)
-        
+
         handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
         handler.start_streaming()
 
+        # Accumulate full response for history
+        full_response = []
+
         def on_chunk(chunk: str) -> None:
             handler.stream_token(chunk)
+            full_response.append(chunk)
 
         try:
-            self.llm_interface.query(text, on_chunk)
+            self.llm_interface.query(messages, on_chunk)
             handler.stream_token(None)
             final_status = handler.wait_for_completion()
-            
+
             if final_status == StreamStatus.COMPLETE:
+                # Add to conversation history if enabled
+                memory_enabled = self.config_manager.get("memory_enabled", True)
+                if memory_enabled:
+                    history_manager = get_conversation_history(self.config_manager)
+                    history_manager.add_message("user", user_text)
+                    history_manager.add_message("assistant", "".join(full_response))
                 return True
             else:
                 error_msg = handler.get_error_message()
                 logger.error(f"Stream failed with status {final_status.value}: {error_msg}")
                 return False
-                
+
         except Exception as e:
             logger.streaming_error("llm_query_error", str(e))
             handler.stop_streaming()
             return False
 
-    def _process_popup(self, text: str, selection_rect) -> bool:
+    def _process_popup(self, messages: list[dict[str, str]], user_text: str, selection_rect) -> bool:
         """
         Processes query in popup mode.
-        
+
         Returns:
             bool: True if successful, False otherwise.
         """
@@ -372,15 +397,19 @@ Apply the instruction to the following text content:
             # Track if any data received
             received_data = False
 
+            # Accumulate full response for history
+            full_response = []
+
             # Define streaming callback
             def on_chunk(chunk: str) -> None:
                 nonlocal received_data
                 received_data = True
                 self.overlay_ui.append_signal.emit(chunk)
+                full_response.append(chunk)
 
             # Query LLM (this blocks until streaming is complete)
-            self.llm_interface.query(text, on_chunk)
-            
+            self.llm_interface.query(messages, on_chunk)
+
             # Check if we got any response
             if not received_data:
                 logger.warning("No data received from LLM")
@@ -388,11 +417,18 @@ Apply the instruction to the following text content:
                     "\n\n❌ Error: No response from LLM. Check your connection."
                 )
                 return False
-            
+
+            # Add to conversation history if enabled
+            memory_enabled = self.config_manager.get("memory_enabled", True)
+            if memory_enabled:
+                history_manager = get_conversation_history(self.config_manager)
+                history_manager.add_message("user", user_text)
+                history_manager.add_message("assistant", "".join(full_response))
+
             # Success! The overlay stays open with the streamed text
             logger.info("Popup streaming completed successfully")
             return True
-            
+
         except Exception as e:
             logger.streaming_error("popup_error", str(e))
             try:

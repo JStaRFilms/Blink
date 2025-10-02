@@ -42,7 +42,9 @@ class ConfigManager:
             "streaming_timeout": 120,  # seconds
             "enable_retry": True,
             "max_retries": 2,
-            "clipboard_context_hotkey": "ctrl+alt+/"
+            "clipboard_context_hotkey": "ctrl+alt+/",
+            "memory_enabled": True,
+            "memory_max_messages": 50
         }
         
         changed = False

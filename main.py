@@ -36,7 +36,7 @@ def main() -> None:
     llm_interface.set_selected_model(selected_model)
 
     # Initialize system tray
-    system_tray = SystemTrayManager(app)
+    system_tray = SystemTrayManager(app, config_manager)
 
     # Connect system tray signals
     def show_settings():
