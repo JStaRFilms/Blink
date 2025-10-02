@@ -131,6 +131,39 @@ Blink/
 └── README.md
 ```
 
+## Testing
+
+Blink includes comprehensive testing to ensure reliability and stability.
+
+### Automated Tests
+
+Run the automated test suite:
+```bash
+python run_tests.py
+```
+
+Or run pytest directly:
+```bash
+python -m pytest tests/ -v
+```
+
+The test suite covers:
+- **Configuration Management**: Loading, saving, and default value handling
+- **Conversation History**: Message storage, capacity limits, and memory management
+- **LLM Interface**: Mocked API calls, error handling, and response parsing
+- **Startup Manager**: Registry operations and executable path detection
+
+### Manual Testing
+
+Before releasing, perform manual testing using the comprehensive checklist in `docs/Manual_Testing_Checklist.md`. This covers edge cases, integration issues, and user experience validation that automated tests cannot catch.
+
+Key areas tested manually:
+- Hotkey behavior in various applications and environments
+- Large text processing and Unicode handling
+- Network failure scenarios
+- GUI responsiveness and positioning
+- Cross-platform compatibility
+
 ## Architecture
 
 The application follows a modular architecture with separate concerns:
