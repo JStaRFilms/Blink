@@ -8,7 +8,7 @@ Uses the 'keyboard' library for more reliable hotkey handling on Windows.
 import threading
 import keyboard as kb
 import time
-from typing import TYPE_CHECKING, Optional, Set, Tuple
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .text_capturer import TextCapturer
@@ -30,12 +30,6 @@ class HotkeyManager:
                  overlay_ui: 'OverlayUI', config_manager: 'ConfigManager') -> None:
         """
         Initializes the HotkeyManager.
-
-        Args:
-            text_capturer (TextCapturer): Text capturer instance.
-            llm_interface (LLMInterface): LLM interface instance.
-            overlay_ui (OverlayUI): Overlay UI instance.
-            config_manager (ConfigManager): Configuration manager instance.
         """
         self.text_capturer = text_capturer
         self.llm_interface = llm_interface
@@ -60,10 +54,7 @@ class HotkeyManager:
     def start(self) -> None:
         """Starts the global hotkey listener."""
         try:
-            # Remove any existing hotkey first to avoid duplicates
             self.stop()
-            
-            # Register the hotkey
             kb.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
             self.hotkey_registered = True
             logger.info(f"Hotkey listener started ({self.hotkey})")
@@ -84,7 +75,6 @@ class HotkeyManager:
     def cleanup(self) -> None:
         """Clean up resources."""
         self.stop()
-        # Ensure all keys are released
         kb.unhook_all()
         logger.info("Hotkey manager cleaned up")
 
@@ -120,10 +110,10 @@ class HotkeyManager:
         Processes the hotkey event with retry logic if enabled.
         """
         try:
-            # Add a small delay to ensure the keys are released and selection is maintained
+            # Add a small delay to ensure keys are released
             time.sleep(0.2)
             
-            # Get config first
+            # Get config
             output_mode = self.config_manager.get("output_mode", "popup")
             enable_retry = self.config_manager.get("enable_retry", True)
             max_retries = self.config_manager.get("max_retries", 2)
@@ -134,7 +124,6 @@ class HotkeyManager:
             while attempt <= max_retries and not success:
                 if attempt > 0:
                     logger.info(f"Retry attempt {attempt} of {max_retries}")
-                    # Add a bit more delay between retries
                     time.sleep(0.3)
                 
                 try:
@@ -155,6 +144,7 @@ class HotkeyManager:
                     
                     # Process the query
                     success = self._process_query(text, selection_rect, output_mode, attempt)
+                    
                     if not success and enable_retry:
                         logger.info(f"Query processing failed, will retry if attempts remain")
                     
@@ -166,30 +156,28 @@ class HotkeyManager:
                 
             if not success:
                 logger.error("Failed to process text after all retry attempts")
-                self.overlay_ui.show_error("Failed to process selected text. Please try again.")
+                # Only show error in popup mode
+                if output_mode == "popup":
+                    try:
+                        self.overlay_ui.reset_signal.emit()
+                        if 'selection_rect' in locals():
+                            self.overlay_ui.position_near_selection(selection_rect)
+                        self.overlay_ui.show_signal.emit()
+                        self.overlay_ui.append_signal.emit(
+                            "❌ Failed to process selected text after multiple attempts.\n"
+                            "Check console for details."
+                        )
+                    except Exception as e:
+                        logger.error(f"Error showing error message: {e}")
                 
         except Exception as e:
             logger.error(f"Unexpected error in process: {e}")
-            self.overlay_ui.show_error("An unexpected error occurred. Please check the logs.")
             
         finally:
-            # Ensure we don't leave any keys stuck
+            # Just ensure keys are released, don't mess with overlay
             kb.release('ctrl')
             kb.release('alt')
             kb.release('.')
-            self.is_processing = False
-            
-            # Reset overlay UI state
-            try:
-                self.overlay_ui.reset_signal.emit()
-                if 'selection_rect' in locals() and selection_rect is not None:
-                    self.overlay_ui.position_near_selection(selection_rect)
-                    self.overlay_ui.show_signal.emit()
-                    self.overlay_ui.append_signal.emit(
-                        "❌ An error occurred. Check console for details."
-                    )
-            except Exception as e:
-                logger.error(f"Error cleaning up overlay UI: {e}")
 
     def _process_query(self, text: str, selection_rect, output_mode: str, attempt: int) -> bool:
         """
@@ -215,28 +203,20 @@ class HotkeyManager:
         """
         timeout = self.config_manager.get("streaming_timeout", 120)
         
-        # Error callback for notifications
         def on_error(error_type: str, message: str) -> None:
             logger.streaming_error(error_type, message)
         
         handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
         handler.start_streaming()
 
-        # Define streaming callback
         def on_chunk(chunk: str) -> None:
             handler.stream_token(chunk)
 
         try:
-            # Query LLM
             self.llm_interface.query(text, on_chunk)
-            
-            # Signal completion
             handler.stream_token(None)
-            
-            # Wait for processing
             final_status = handler.wait_for_completion()
             
-            # Check if successful
             if final_status == StreamStatus.COMPLETE:
                 return True
             else:
@@ -257,7 +237,7 @@ class HotkeyManager:
             bool: True if successful, False otherwise.
         """
         try:
-            # Setup overlay
+            # Setup overlay ONCE at the start
             self.overlay_ui.reset_signal.emit()
             self.overlay_ui.position_near_selection(selection_rect)
             self.overlay_ui.show_signal.emit()
@@ -271,7 +251,7 @@ class HotkeyManager:
                 received_data = True
                 self.overlay_ui.append_signal.emit(chunk)
 
-            # Query LLM
+            # Query LLM (this blocks until streaming is complete)
             self.llm_interface.query(text, on_chunk)
             
             # Check if we got any response
@@ -282,6 +262,8 @@ class HotkeyManager:
                 )
                 return False
             
+            # Success! The overlay stays open with the streamed text
+            logger.info("Popup streaming completed successfully")
             return True
             
         except Exception as e:
@@ -294,7 +276,7 @@ class HotkeyManager:
 
     def retry_last_query(self) -> None:
         """
-        Manually retry the last query. Can be bound to a hotkey or menu item.
+        Manually retry the last query.
         """
         if self.last_query_text:
             logger.info("Manual retry triggered")
