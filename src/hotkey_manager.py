@@ -143,7 +143,7 @@ class HotkeyManager:
 
     def process_clipboard_context(self) -> None:
         """
-        Processes the clipboard context hotkey event.
+        Processes the clipboard context hotkey event with retry logic if enabled.
         """
         try:
             # Add a small delay to ensure keys are released
@@ -151,35 +151,36 @@ class HotkeyManager:
 
             # Get config
             output_mode = self.config_manager.get("output_mode", "popup")
+            enable_retry = self.config_manager.get("enable_retry", True)
+            max_retries = self.config_manager.get("max_retries", 2)
 
-            # Get clipboard content
-            clipboard_content = self.text_capturer.get_clipboard_content()
-            if not clipboard_content or not clipboard_content.strip():
-                logger.warning("Clipboard is empty, cannot process clipboard context")
-                if output_mode == "popup":
-                    try:
-                        self.overlay_ui.reset_signal.emit()
-                        self.overlay_ui.show_signal.emit()
-                        self.overlay_ui.append_signal.emit("❌ Clipboard is empty. Please copy some text first.")
-                    except Exception as e:
-                        logger.error(f"Error showing clipboard empty message: {e}")
-                return
+            attempt = 0
+            success = False
 
-            # Get selected instruction text
-            selected_instruction = self.text_capturer.capture_selected_text()
-            if not selected_instruction or not selected_instruction.strip():
-                logger.warning("No instruction text selected, cannot process clipboard context")
-                if output_mode == "popup":
-                    try:
-                        self.overlay_ui.reset_signal.emit()
-                        self.overlay_ui.show_signal.emit()
-                        self.overlay_ui.append_signal.emit("❌ No instruction selected. Please select some text to use as the instruction.")
-                    except Exception as e:
-                        logger.error(f"Error showing no instruction message: {e}")
-                return
+            while attempt <= max_retries and not success:
+                if attempt > 0:
+                    logger.info(f"Clipboard context retry attempt {attempt} of {max_retries}")
+                    time.sleep(0.3)
 
-            # Format the final prompt
-            final_prompt = f"""
+                try:
+                    # Get clipboard content
+                    clipboard_content = self.text_capturer.get_clipboard_content()
+                    if not clipboard_content or not clipboard_content.strip():
+                        logger.warning(f"Clipboard is empty (attempt {attempt + 1}/{max_retries + 1})")
+                        attempt += 1
+                        continue
+
+                    # Get selected instruction text
+                    selected_instruction = self.text_capturer.capture_selected_text()
+                    if not selected_instruction or not selected_instruction.strip():
+                        logger.warning(f"No instruction text selected (attempt {attempt + 1}/{max_retries + 1})")
+                        attempt += 1
+                        continue
+
+                    logger.debug(f"Captured instruction: {selected_instruction[:50]}..." if len(selected_instruction) > 50 else f"Captured instruction: {selected_instruction}")
+
+                    # Format the final prompt
+                    final_prompt = f"""
 Please execute the following instruction:
 ---
 {selected_instruction}
@@ -191,19 +192,28 @@ Apply the instruction to the following text content:
 ---
 """
 
-            logger.debug(f"Clipboard context prompt formatted: {final_prompt[:100]}...")
+                    logger.debug(f"Clipboard context prompt formatted: {final_prompt[:100]}...")
 
-            # Process the query using existing logic
-            success = self._process_clipboard_context_query(final_prompt, output_mode)
+                    # Process the query using existing logic
+                    success = self._process_clipboard_context_query(final_prompt, output_mode)
+
+                    if not success and enable_retry:
+                        logger.info(f"Clipboard context query processing failed, will retry if attempts remain")
+
+                except Exception as e:
+                    logger.error(f"Error during clipboard context processing (attempt {attempt + 1}): {e}")
+                    success = False
+
+                attempt += 1
 
             if not success:
-                logger.error("Failed to process clipboard context query")
+                logger.error("Failed to process clipboard context after all retry attempts")
                 if output_mode == "popup":
                     try:
                         self.overlay_ui.reset_signal.emit()
                         self.overlay_ui.show_signal.emit()
                         self.overlay_ui.append_signal.emit(
-                            "❌ Failed to process clipboard context.\n"
+                            "❌ Failed to process clipboard context after multiple attempts.\n"
                             "Check console for details."
                         )
                     except Exception as e:
@@ -302,6 +312,12 @@ Apply the instruction to the following text content:
         preview = text[:50] + "..." if len(text) > 50 else text
         logger.streaming_started(preview)
 
+        # Get system prompt if configured
+        system_prompt = self.config_manager.get("system_prompt", "").strip()
+        system_messages = []
+        if system_prompt:
+            system_messages = [{"role": "system", "content": system_prompt}]
+
         # Get conversation history if memory is enabled
         memory_enabled = self.config_manager.get("memory_enabled", True)
         if memory_enabled:
@@ -313,8 +329,8 @@ Apply the instruction to the following text content:
         # Create new user message
         new_message = {"role": "user", "content": text}
 
-        # Combine history with new message
-        messages_to_send = current_history + [new_message]
+        # Combine system prompt, history, and new message in correct order
+        messages_to_send = system_messages + current_history + [new_message]
 
         if output_mode == "direct_stream":
             return self._process_direct_stream(messages_to_send, text, attempt)
@@ -331,10 +347,30 @@ Apply the instruction to the following text content:
         preview = text[:50] + "..." if len(text) > 50 else text
         logger.streaming_started(f"Clipboard Context: {preview}")
 
-        if output_mode == "direct_stream":
-            return self._process_clipboard_direct_stream(text)
+        # Get system prompt if configured
+        system_prompt = self.config_manager.get("system_prompt", "").strip()
+        system_messages = []
+        if system_prompt:
+            system_messages = [{"role": "system", "content": system_prompt}]
+
+        # Get conversation history if memory is enabled
+        memory_enabled = self.config_manager.get("memory_enabled", True)
+        if memory_enabled:
+            history_manager = get_conversation_history(self.config_manager)
+            current_history = history_manager.get_history()
         else:
-            return self._process_clipboard_popup(text)
+            current_history = []
+
+        # Create new user message
+        new_message = {"role": "user", "content": text}
+
+        # Combine system prompt, history, and new message in correct order
+        messages_to_send = system_messages + current_history + [new_message]
+
+        if output_mode == "direct_stream":
+            return self._process_clipboard_direct_stream(messages_to_send, text)
+        else:
+            return self._process_clipboard_popup(messages_to_send, text)
 
     def _process_direct_stream(self, messages: list[dict[str, str]], user_text: str, attempt: int) -> bool:
         """
@@ -437,7 +473,7 @@ Apply the instruction to the following text content:
                 pass
             return False
 
-    def _process_clipboard_direct_stream(self, text: str) -> bool:
+    def _process_clipboard_direct_stream(self, messages: list[dict[str, str]], user_text: str) -> bool:
         """
         Processes clipboard context query in direct stream mode with error handling.
 
@@ -452,15 +488,25 @@ Apply the instruction to the following text content:
         handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
         handler.start_streaming()
 
+        # Accumulate full response for history
+        full_response = []
+
         def on_chunk(chunk: str) -> None:
             handler.stream_token(chunk)
+            full_response.append(chunk)
 
         try:
-            self.llm_interface.query(text, on_chunk)
+            self.llm_interface.query(messages, on_chunk)
             handler.stream_token(None)
             final_status = handler.wait_for_completion()
 
             if final_status == StreamStatus.COMPLETE:
+                # Add to conversation history if enabled
+                memory_enabled = self.config_manager.get("memory_enabled", True)
+                if memory_enabled:
+                    history_manager = get_conversation_history(self.config_manager)
+                    history_manager.add_message("user", user_text)
+                    history_manager.add_message("assistant", "".join(full_response))
                 return True
             else:
                 error_msg = handler.get_error_message()
@@ -472,7 +518,7 @@ Apply the instruction to the following text content:
             handler.stop_streaming()
             return False
 
-    def _process_clipboard_popup(self, text: str) -> bool:
+    def _process_clipboard_popup(self, messages: list[dict[str, str]], user_text: str) -> bool:
         """
         Processes clipboard context query in popup mode.
 
@@ -487,14 +533,18 @@ Apply the instruction to the following text content:
             # Track if any data received
             received_data = False
 
+            # Accumulate full response for history
+            full_response = []
+
             # Define streaming callback
             def on_chunk(chunk: str) -> None:
                 nonlocal received_data
                 received_data = True
                 self.overlay_ui.append_signal.emit(chunk)
+                full_response.append(chunk)
 
             # Query LLM (this blocks until streaming is complete)
-            self.llm_interface.query(text, on_chunk)
+            self.llm_interface.query(messages, on_chunk)
 
             # Check if we got any response
             if not received_data:
@@ -503,6 +553,13 @@ Apply the instruction to the following text content:
                     "\n\n❌ Error: No response from LLM. Check your connection."
                 )
                 return False
+
+            # Add to conversation history if enabled
+            memory_enabled = self.config_manager.get("memory_enabled", True)
+            if memory_enabled:
+                history_manager = get_conversation_history(self.config_manager)
+                history_manager.add_message("user", user_text)
+                history_manager.add_message("assistant", "".join(full_response))
 
             # Success! The overlay stays open with the streamed text
             logger.info("Clipboard context popup streaming completed successfully")

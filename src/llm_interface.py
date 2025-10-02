@@ -80,27 +80,22 @@ class LLMInterface:
             messages (list[dict[str, str]]): List of message dictionaries with 'role' and 'content' keys.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
         """
-        # Get system prompt from config if available
-        system_prompt = ""
-        if self.config_manager:
-            system_prompt = self.config_manager.get("system_prompt", "")
-
         if self.selected_model.startswith("ollama:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_ollama(messages, on_chunk, model_name, system_prompt)
+            self.query_ollama(messages, on_chunk, model_name)
         elif self.selected_model.startswith("openai:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_openai(messages, on_chunk, model_name, system_prompt)
+            self.query_openai(messages, on_chunk, model_name)
         elif self.selected_model.startswith("gemini:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_gemini(messages, on_chunk, model_name, system_prompt)
+            self.query_gemini(messages, on_chunk, model_name)
         elif self.selected_model.startswith("lmstudio:"):
             model_name = self.selected_model.split(":", 1)[1]
-            self.query_lmstudio(messages, on_chunk, model_name, system_prompt)
+            self.query_lmstudio(messages, on_chunk, model_name)
         else:
             on_chunk("Error: Unsupported model type")
 
-    def query_ollama(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "llama3.2:latest", system_prompt: str = "") -> None:
+    def query_ollama(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "llama3.2:latest") -> None:
         """
         Sends a query to Ollama and streams the response.
 
@@ -108,18 +103,12 @@ class LLMInterface:
             messages (list[dict[str, str]]): List of message dictionaries.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): Ollama model name.
-            system_prompt (str): System prompt to customize AI behavior.
         """
         url = f"{self.base_url}/api/chat"
 
-        # Prepare messages, adding system prompt if provided
-        ollama_messages = messages.copy()
-        if system_prompt:
-            ollama_messages.insert(0, {"role": "system", "content": system_prompt})
-
         data = {
             "model": model,
-            "messages": ollama_messages,
+            "messages": messages,
             "stream": True
         }
 
@@ -142,7 +131,7 @@ class LLMInterface:
             error_msg = f"Error communicating with Ollama: {e}"
             on_chunk(error_msg)
 
-    def query_openai(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gpt-4", system_prompt: str = "") -> None:
+    def query_openai(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
         """
         Sends a query to OpenAI and streams the response.
 
@@ -150,21 +139,15 @@ class LLMInterface:
             messages (list[dict[str, str]]): List of message dictionaries.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): OpenAI model name.
-            system_prompt (str): System prompt to customize AI behavior.
         """
         if not self.openai_client:
             on_chunk("Error: OpenAI client not configured. Please set API key in settings.")
             return
 
         try:
-            # Prepare messages, adding system prompt if provided
-            openai_messages = messages.copy()
-            if system_prompt:
-                openai_messages.insert(0, {"role": "system", "content": system_prompt})
-
             stream = self.openai_client.chat.completions.create(
                 model=model,
-                messages=openai_messages,
+                messages=messages,
                 stream=True
             )
 
@@ -176,7 +159,7 @@ class LLMInterface:
             error_msg = f"Error communicating with OpenAI: {e}"
             on_chunk(error_msg)
 
-    def query_gemini(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gemini-pro", system_prompt: str = "") -> None:
+    def query_gemini(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
         """
         Sends a query to Google Gemini and streams the response.
 
@@ -184,7 +167,6 @@ class LLMInterface:
             messages (list[dict[str, str]]): List of message dictionaries.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): Gemini model name.
-            system_prompt (str): System prompt to customize AI behavior.
         """
         if not self.gemini_available:
             on_chunk("Error: Gemini client not configured. Please set API key in settings.")
@@ -194,23 +176,18 @@ class LLMInterface:
             # For Gemini, concatenate messages into a single prompt for now
             # TODO: Implement proper multi-turn conversation using chat sessions
             prompt_parts = []
-            if system_prompt:
-                prompt_parts.append(f"System: {system_prompt}")
             for msg in messages:
                 role = msg["role"]
                 content = msg["content"]
-                if role == "user":
+                if role == "system":
+                    prompt_parts.append(f"System: {content}")
+                elif role == "user":
                     prompt_parts.append(f"User: {content}")
                 elif role == "assistant":
                     prompt_parts.append(f"Assistant: {content}")
             full_prompt = "\n\n".join(prompt_parts)
 
-            # Create model with system instructions if provided
-            config = {}
-            if system_prompt:
-                config["system_instruction"] = system_prompt
-
-            gemini_model = genai.GenerativeModel(model, generation_config=config)
+            gemini_model = genai.GenerativeModel(model)
             response = gemini_model.generate_content(full_prompt, stream=True)
 
             for chunk in response:
@@ -221,7 +198,7 @@ class LLMInterface:
             error_msg = f"Error communicating with Gemini: {e}"
             on_chunk(error_msg)
 
-    def query_lmstudio(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "local-model", system_prompt: str = "") -> None:
+    def query_lmstudio(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "local-model") -> None:
         """
         Sends a query to LM Studio and streams the response.
 
@@ -229,20 +206,14 @@ class LLMInterface:
             messages (list[dict[str, str]]): List of message dictionaries.
             on_chunk (Callable[[str], None]): Callback function called for each response chunk.
             model (str): LM Studio model name.
-            system_prompt (str): System prompt to customize AI behavior.
         """
         try:
             # Create OpenAI client for LM Studio (OpenAI-compatible API)
             lmstudio_client = OpenAI(base_url=self.lmstudio_base_url + "/v1", api_key="not-needed")
 
-            # Prepare messages, adding system prompt if provided
-            lmstudio_messages = messages.copy()
-            if system_prompt:
-                lmstudio_messages.insert(0, {"role": "system", "content": system_prompt})
-
             stream = lmstudio_client.chat.completions.create(
                 model=model,
-                messages=lmstudio_messages,
+                messages=messages,
                 stream=True
             )
 
