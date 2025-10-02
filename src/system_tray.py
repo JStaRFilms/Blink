@@ -9,6 +9,7 @@ from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import pyqtSignal, QObject
 from typing import Optional
 import os
+from .utils import get_asset_path
 
 
 class SystemTrayManager(QObject):
@@ -35,7 +36,7 @@ class SystemTrayManager(QObject):
         self.tray_icon = QSystemTrayIcon(self.app)
 
         # Try to load icon from assets
-        icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+        icon_path = get_asset_path("icon.ico")
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
         else:

@@ -1,0 +1,114 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Define gradients -->
+  <defs>
+    <linearGradient id="brainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7b68ee;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4169e1;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="neuralGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7b68ee;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Brain outline -->
+  <path d="M100 50 C120 50, 130 60, 130 75 C130 85, 125 90, 125 95 C125 100, 130 105, 130 115 C130 130, 120 140, 100 140 C80 140, 70 130, 70 115 C70 105, 75 100, 75 95 C75 90, 70 85, 70 75 C70 60, 80 50, 100 50 Z" 
+        fill="none" 
+        stroke="url(#brainGradient)" 
+        stroke-width="3" 
+        opacity="0.9"/>
+  
+  <!-- Neural pathways -->
+  <g stroke="url(#neuralGradient)" stroke-width="2" fill="none" opacity="0.8">
+    <!-- Left hemisphere pathways -->
+    <path d="M85 70 C90 75, 85 85, 90 95 C95 105, 90 115, 85 120" />
+    <path d="M80 80 C85 85, 80 95, 85 105" />
+    <path d="M85 90 C90 95, 85 105, 90 110" />
+    
+    <!-- Right hemisphere pathways -->
+    <path d="M115 70 C110 75, 115 85, 110 95 C105 105, 110 115, 115 120" />
+    <path d="M120 80 C115 85, 120 95, 115 105" />
+    <path d="M115 90 C110 95, 115 105, 110 110" />
+    
+    <!-- Connecting pathways -->
+    <path d="M85 80 L115 80" />
+    <path d="M85 95 L115 95" />
+    <path d="M85 110 L115 110" />
+  </g>
+  
+  <!-- Neural nodes -->
+  <g fill="#00d4ff" filter="url(#glow)">
+    <circle cx="85" cy="70" r="3" />
+    <circle cx="85" cy="80" r="3" />
+    <circle cx="85" cy="90" r="3" />
+    <circle cx="85" cy="95" r="3" />
+    <circle cx="85" cy="110" r="3" />
+    <circle cx="85" cy="120" r="3" />
+    
+    <circle cx="115" cy="70" r="3" />
+    <circle cx="115" cy="80" r="3" />
+    <circle cx="115" cy="90" r="3" />
+    <circle cx="115" cy="95" r="3" />
+    <circle cx="115" cy="110" r="3" />
+    <circle cx="115" cy="120" r="3" />
+    
+    <circle cx="100" cy="80" r="3" />
+    <circle cx="100" cy="95" r="3" />
+    <circle cx="100" cy="110" r="3" />
+  </g>
+  
+  <!-- Cursor/Lightning element -->
+  <g transform="translate(100, 95)">
+    <!-- Lightning bolt shape -->
+    <path d="M0 -15 L-5 -5 L0 -5 L0 15 L5 5 L0 5 Z" 
+          fill="#00d4ff" 
+          filter="url(#glow)" 
+          opacity="0.9">
+      <!-- Animation for blinking effect -->
+      <animate attributeName="opacity" 
+               values="0.9;0.3;0.9" 
+               dur="1.5s" 
+               repeatCount="indefinite"/>
+    </path>
+  </g>
+  
+  <!-- Spark particles around the cursor -->
+  <g fill="#00d4ff" opacity="0.7">
+    <circle cx="95" cy="80" r="1.5">
+      <animate attributeName="opacity" 
+               values="0;0.7;0" 
+               dur="2s" 
+               repeatCount="indefinite"/>
+    </circle>
+    <circle cx="105" cy="80" r="1.5">
+      <animate attributeName="opacity" 
+               values="0;0.7;0" 
+               dur="2s" 
+               begin="0.5s"
+               repeatCount="indefinite"/>
+    </circle>
+    <circle cx="95" cy="110" r="1.5">
+      <animate attributeName="opacity" 
+               values="0;0.7;0" 
+               dur="2s" 
+               begin="1s"
+               repeatCount="indefinite"/>
+    </circle>
+    <circle cx="105" cy="110" r="1.5">
+      <animate attributeName="opacity" 
+               values="0;0.7;0" 
+               dur="2s" 
+               begin="1.5s"
+               repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>

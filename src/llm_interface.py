@@ -7,7 +7,7 @@ Provides a unified interface for communicating with LLMs, supporting Ollama and 
 import json
 import requests
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict, Any, List, Union
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
@@ -87,13 +87,27 @@ class LLMInterface:
         """
         self.selected_model = model
 
-    def query(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None]) -> None:
+    def is_multimodal(self) -> bool:
+        """
+        Checks if the current selected model supports multimodal input.
+        
+        Returns:
+            bool: True if the model is multimodal, False otherwise.
+        """
+        if not self.config_manager:
+            return False
+            
+        model_name = self.selected_model.split(":", 1)[1] if ":" in self.selected_model else self.selected_model
+        return self.config_manager.is_multimodal_model(model_name)
+
+    def query(self, messages: List[Dict[str, Union[str, List[Dict[str, Any]]]]], on_chunk: Callable[[str], None]) -> None:
         """
         Sends a query to the selected LLM and streams the response.
 
         Args:
-            messages (list[dict[str, str]]): List of message dictionaries with 'role' and 'content' keys.
-            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
+            messages: List of message dictionaries with 'role' and 'content' keys.
+                      Content can be a string or a list of content items (for multimodal).
+            on_chunk: Callback function called for each response chunk.
         """
         if self.selected_model.startswith("ollama:"):
             model_name = self.selected_model.split(":", 1)[1]
@@ -110,20 +124,51 @@ class LLMInterface:
         else:
             on_chunk("Error: Unsupported model type")
 
-    def query_ollama(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "llama3.2:latest") -> None:
+    def query_ollama(self, messages: List[Dict[str, Union[str, List[Dict[str, Any]]]]], 
+                    on_chunk: Callable[[str], None], model: str = "llama3.2:latest") -> None:
         """
         Sends a query to Ollama and streams the response.
 
         Args:
-            messages (list[dict[str, str]]): List of message dictionaries.
-            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
-            model (str): Ollama model name.
+            messages: List of message dictionaries.
+            on_chunk: Callback function called for each response chunk.
+            model: Ollama model name.
         """
         url = f"{self.base_url}/api/chat"
 
+        # Process messages to handle multimodal content
+        processed_messages = []
+        for message in messages:
+            if isinstance(message.get("content"), list):
+                # For multimodal content, convert to Ollama format
+                content_list = message["content"]
+                text_parts = []
+                images = []
+                
+                for item in content_list:
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                    elif item.get("type") == "image_url":
+                        # Extract base64 image data
+                        image_url = item.get("image_url", {}).get("url", "")
+                        if image_url.startswith("data:image/"):
+                            # Remove data:image/...;base64, prefix
+                            base64_data = image_url.split(",", 1)[1]
+                            images.append(base64_data)
+                
+                processed_message = {
+                    "role": message.get("role"),
+                    "content": " ".join(text_parts),
+                    "images": images
+                }
+                processed_messages.append(processed_message)
+            else:
+                # Regular text message
+                processed_messages.append(message)
+
         data = {
             "model": model,
-            "messages": messages,
+            "messages": processed_messages,
             "stream": True
         }
 
@@ -154,14 +199,15 @@ class LLMInterface:
         except requests.RequestException as e:
             raise LLMConnectionError(f"Network error communicating with Ollama: {e}")
 
-    def query_openai(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
+    def query_openai(self, messages: List[Dict[str, Union[str, List[Dict[str, Any]]]]], 
+                    on_chunk: Callable[[str], None], model: str = "gpt-4") -> None:
         """
         Sends a query to OpenAI and streams the response.
 
         Args:
-            messages (list[dict[str, str]]): List of message dictionaries.
-            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
-            model (str): OpenAI model name.
+            messages: List of message dictionaries.
+            on_chunk: Callback function called for each response chunk.
+            model: OpenAI model name.
         """
         if not self.openai_client:
             raise LLMConfigError("OpenAI client not configured. Please set API key in settings.")
@@ -185,36 +231,75 @@ class LLMInterface:
             else:
                 raise LLMConnectionError(f"Error communicating with OpenAI: {e}")
 
-    def query_gemini(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
+    def query_gemini(self, messages: List[Dict[str, Union[str, List[Dict[str, Any]]]]], 
+                    on_chunk: Callable[[str], None], model: str = "gemini-pro") -> None:
         """
         Sends a query to Google Gemini and streams the response.
 
         Args:
-            messages (list[dict[str, str]]): List of message dictionaries.
-            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
-            model (str): Gemini model name.
+            messages: List of message dictionaries.
+            on_chunk: Callback function called for each response chunk.
+            model: Gemini model name.
         """
         if not self.gemini_available:
             on_chunk("Error: Gemini client not configured. Please set API key in settings.")
             return
 
         try:
-            # For Gemini, concatenate messages into a single prompt for now
-            # TODO: Implement proper multi-turn conversation using chat sessions
-            prompt_parts = []
-            for msg in messages:
-                role = msg["role"]
-                content = msg["content"]
+            # Process messages to handle multimodal content
+            contents = []
+            for message in messages:
+                role = message.get("role")
+                content = message.get("content")
+                
                 if role == "system":
-                    prompt_parts.append(f"System: {content}")
+                    # System messages in Gemini are added as a user message with a prefix
+                    if isinstance(content, str):
+                        contents.append({"role": "user", "parts": [{"text": f"System: {content}"}]})
+                    else:
+                        # For multimodal system messages, convert to text
+                        text_parts = []
+                        for item in content:
+                            if item.get("type") == "text":
+                                text_parts.append(item.get("text", ""))
+                        contents.append({"role": "user", "parts": [{"text": f"System: {' '.join(text_parts)}"}]})
                 elif role == "user":
-                    prompt_parts.append(f"User: {content}")
+                    if isinstance(content, str):
+                        contents.append({"role": "user", "parts": [{"text": content}]})
+                    else:
+                        # Multimodal content
+                        parts = []
+                        for item in content:
+                            if item.get("type") == "text":
+                                parts.append({"text": item.get("text", "")})
+                            elif item.get("type") == "image_url":
+                                # Extract base64 image data
+                                image_url = item.get("image_url", {}).get("url", "")
+                                if image_url.startswith("data:image/"):
+                                    # Extract MIME type and base64 data
+                                    mime_type = image_url.split(":", 1)[1].split(";", 1)[0]
+                                    base64_data = image_url.split(",", 1)[1]
+                                    import base64
+                                    image_data = base64.b64decode(base64_data)
+                                    parts.append({"inline_data": {"mime_type": mime_type, "data": image_data}})
+                        contents.append({"role": "user", "parts": parts})
                 elif role == "assistant":
-                    prompt_parts.append(f"Assistant: {content}")
-            full_prompt = "\n\n".join(prompt_parts)
+                    if isinstance(content, str):
+                        contents.append({"role": "model", "parts": [{"text": content}]})
+                    else:
+                        # For multimodal assistant messages, convert to text
+                        text_parts = []
+                        for item in content:
+                            if item.get("type") == "text":
+                                text_parts.append(item.get("text", ""))
+                        contents.append({"role": "model", "parts": [{"text": " ".join(text_parts)}]})
 
+            # Start chat with Gemini
             gemini_model = genai.GenerativeModel(model)
-            response = gemini_model.generate_content(full_prompt, stream=True)
+            chat = gemini_model.start_chat(history=contents[:-1])
+            
+            # Send the last message and stream the response
+            response = chat.send_message(contents[-1]["parts"], stream=True)
 
             for chunk in response:
                 if chunk.text:
@@ -224,14 +309,15 @@ class LLMInterface:
             error_msg = f"Error communicating with Gemini: {e}"
             on_chunk(error_msg)
 
-    def query_lmstudio(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], model: str = "local-model") -> None:
+    def query_lmstudio(self, messages: List[Dict[str, Union[str, List[Dict[str, Any]]]]], 
+                      on_chunk: Callable[[str], None], model: str = "local-model") -> None:
         """
         Sends a query to LM Studio and streams the response.
 
         Args:
-            messages (list[dict[str, str]]): List of message dictionaries.
-            on_chunk (Callable[[str], None]): Callback function called for each response chunk.
-            model (str): LM Studio model name.
+            messages: List of message dictionaries.
+            on_chunk: Callback function called for each response chunk.
+            model: LM Studio model name.
         """
         try:
             # Create OpenAI client for LM Studio (OpenAI-compatible API)
@@ -298,9 +384,31 @@ class LLMInterface:
 
         # Add cloud models if configured
         if self.openai_client:
-            models.extend(["openai:gpt-4", "openai:gpt-3.5-turbo"])
+            models.extend([
+                "openai:gpt-5",
+                "openai:gpt-5-mini",
+                "openai:gpt-5-nano",
+                "openai:gpt-5-chat-latest",
+                "openai:gpt-5-thinking",
+                "openai:gpt-5-thinking-mini",
+                "openai:gpt-5-thinking-nano",
+                "openai:gpt-5-main",
+                "openai:gpt-5-main-mini",
+                # keep older / fallback models too
+                "openai:gpt-4.1",
+                "openai:gpt-4o",
+                "openai:gpt-3.5-turbo",
+            ])
+            
         if self.gemini_available:
-            models.extend(["gemini:gemini-flash-latest", "gemini:gemini-flash-lite-latest"])
+            models.extend([
+                "gemini:gemini-2.5-pro",    # strongest reasoning model :contentReference[oaicite:6]{index=6}  
+                "gemini:gemini-2.5-flash",  # balanced speed / cost model :contentReference[oaicite:7]{index=7} 
+                "gemini:gemini-flash-latest",   # balanced speed / cost model :contentReference[oaicite:7]{index=7}
+                "gemini:gemini-2.5-flash-lite", # lightweight fast version (preview) :contentReference[oaicite:8]{index=8}  
+                "gemini:gemini-flash-lite-latest",  # lightweight fast version (preview) :contentReference[oaicite:9]{index=9}  
+                "gemini:gemini-2.5-flash-image-preview",    # for image/visual capabilities :contentReference[oaicite:10]{index=10}  
+            ])
 
         # Cache the results
         self._cached_models = models.copy()
