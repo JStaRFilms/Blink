@@ -70,9 +70,9 @@ class HotkeyManager:
         """Starts the global hotkey listener."""
         try:
             self.stop()
-            kb.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
+            kb.add_hotkey(self.hotkey, self.on_hotkey, suppress=False)
             self.hotkey_registered = True
-            kb.add_hotkey(self.clipboard_context_hotkey, self.on_clipboard_context_hotkey, suppress=True)
+            kb.add_hotkey(self.clipboard_context_hotkey, self.on_clipboard_context_hotkey, suppress=False)
             self.clipboard_context_hotkey_registered = True
             logger.info(f"Hotkey listeners started ({self.hotkey}, {self.clipboard_context_hotkey})")
         except Exception as e:
@@ -104,27 +104,13 @@ class HotkeyManager:
         if self.is_processing:
             logger.debug("Already processing a request, ignoring hotkey")
             return
-            
-        try:
-            self.is_processing = True
-            logger.info(f"HOTKEY TRIGGERED: {self.hotkey}")
-            
-            # Ensure all keys are released before proceeding
-            kb.release('ctrl')
-            kb.release('alt')
-            kb.release('.')
-            
-            # Process in a separate thread to avoid blocking
-            process_thread = threading.Thread(target=self.process, daemon=True)
-            process_thread.start()
-            
-            # Wait a bit before allowing the next hotkey press
-            time.sleep(0.1)
-            
-        except Exception as e:
-            logger.error(f"Error in hotkey handler: {e}")
-        finally:
-            self.is_processing = False
+
+        self.is_processing = True
+        logger.info(f"HOTKEY TRIGGERED: {self.hotkey}")
+
+        # Process in a separate thread to avoid blocking
+        process_thread = threading.Thread(target=self.process, daemon=True)
+        process_thread.start()
 
     def on_clipboard_context_hotkey(self) -> None:
         """Callback for when the clipboard context hotkey is pressed."""
@@ -132,26 +118,12 @@ class HotkeyManager:
             logger.debug("Already processing a request, ignoring clipboard context hotkey")
             return
 
-        try:
-            self.is_processing = True
-            logger.info(f"CLIPBOARD CONTEXT HOTKEY TRIGGERED: {self.clipboard_context_hotkey}")
+        self.is_processing = True
+        logger.info(f"CLIPBOARD CONTEXT HOTKEY TRIGGERED: {self.clipboard_context_hotkey}")
 
-            # Ensure all keys are released before proceeding
-            kb.release('ctrl')
-            kb.release('alt')
-            kb.release('/')
-
-            # Process in a separate thread to avoid blocking
-            process_thread = threading.Thread(target=self.process_clipboard_context, daemon=True)
-            process_thread.start()
-
-            # Wait a bit before allowing the next hotkey press
-            time.sleep(0.1)
-
-        except Exception as e:
-            logger.error(f"Error in clipboard context hotkey handler: {e}")
-        finally:
-            self.is_processing = False
+        # Process in a separate thread to avoid blocking
+        process_thread = threading.Thread(target=self.process_clipboard_context, daemon=True)
+        process_thread.start()
 
     def process_clipboard_context(self) -> None:
         """
@@ -230,9 +202,7 @@ class HotkeyManager:
         except Exception as e:
             logger.error(f"Unexpected error in process_clipboard_context: {e}")
         finally:
-            kb.release('ctrl')
-            kb.release('alt')
-            kb.release('/')
+            self.is_processing = False
 
     def _format_multimodal_prompt(self, instruction: str, image_data: str, mime_type: str) -> list[dict]:
         """
@@ -347,12 +317,9 @@ class HotkeyManager:
                 
         except Exception as e:
             logger.error(f"Unexpected error in process: {e}")
-            
+
         finally:
-            # Just ensure keys are released, don't mess with overlay
-            kb.release('ctrl')
-            kb.release('alt')
-            kb.release('.')
+            self.is_processing = False
 
     def _process_query(self, text: str, selection_rect, output_mode: str, attempt: int) -> bool:
         """

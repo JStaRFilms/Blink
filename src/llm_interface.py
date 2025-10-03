@@ -8,6 +8,7 @@ import json
 import requests
 import time
 import base64
+import os
 from typing import Callable, Optional, Dict, Any, List, Union
 try:
     from openai import OpenAI
@@ -83,6 +84,66 @@ class LLMInterface:
             self.gemini_available = False
 
         self.file_reader = FileReader(self.config_manager)
+
+        # Disk cache for models
+        self.models_cache_path = None
+        if self.config_manager and hasattr(self.config_manager, 'get_app_data_path'):
+            try:
+                self.models_cache_path = os.path.join(self.config_manager.get_app_data_path(), "models_cache.json")
+            except Exception:
+                self.models_cache_path = None
+
+    def _load_models_from_cache(self) -> tuple[Optional[list[str]], Optional[float]]:
+        """
+        Loads models from disk cache.
+
+        Returns:
+            tuple: (models_list, timestamp) or (None, None) if cache doesn't exist or is invalid
+        """
+        if not self.models_cache_path or not os.path.exists(self.models_cache_path):
+            return None, None
+
+        try:
+            with open(self.models_cache_path, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+
+            models = cache_data.get('models', [])
+            timestamp = cache_data.get('timestamp', 0)
+
+            # Check if cache is not too old (24 hours)
+            if time.time() - timestamp < 86400:
+                return models, timestamp
+            else:
+                return None, None
+
+        except (json.JSONDecodeError, KeyError, IOError):
+            return None, None
+
+    def _save_models_to_cache(self, models: list[str]) -> None:
+        """
+        Saves models to disk cache.
+
+        Args:
+            models: List of model identifiers to cache
+        """
+        if not self.models_cache_path:
+            return
+
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.models_cache_path), exist_ok=True)
+
+            cache_data = {
+                'models': models,
+                'timestamp': time.time()
+            }
+
+            with open(self.models_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2)
+
+        except IOError:
+            # Silently fail if we can't write cache
+            pass
 
     def set_selected_model(self, model: str) -> None:
         """
@@ -513,3 +574,54 @@ class LLMInterface:
             messages_to_send = system_messages + current_history + [user_message]
 
         self.query(messages_to_send, on_chunk)
+
+
+try:
+    from PyQt6.QtCore import QObject, pyqtSignal, QThread
+    QT_AVAILABLE = True
+except ImportError:
+    QT_AVAILABLE = False
+
+
+if QT_AVAILABLE:
+    class ModelFetcher(QObject):
+        """
+        QObject for fetching models in a background thread.
+        Emits models_ready signal when fetching is complete.
+        """
+
+        models_ready = pyqtSignal(list)
+
+        def __init__(self, llm_interface: 'LLMInterface'):
+            """
+            Initializes the ModelFetcher.
+
+            Args:
+                llm_interface: LLMInterface instance to fetch models from
+            """
+            super().__init__()
+            self.llm_interface = llm_interface
+
+        def fetch_models(self) -> None:
+            """
+            Fetches available models and emits the models_ready signal.
+            This method runs in a background thread.
+            """
+            try:
+                # Force refresh of cache and fetch fresh models
+                self.llm_interface.refresh_models_cache()
+                models = self.llm_interface.get_available_models()
+
+                # Save to disk cache
+                self.llm_interface._save_models_to_cache(models)
+
+                # Emit signal with the fresh models
+                self.models_ready.emit(models)
+
+            except Exception as e:
+                # On error, emit empty list or cached models if available
+                cached_models, _ = self.llm_interface._load_models_from_cache()
+                if cached_models:
+                    self.models_ready.emit(cached_models)
+                else:
+                    self.models_ready.emit([])

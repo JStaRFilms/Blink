@@ -5,7 +5,7 @@ Provides a centralized GUI for configuring all application options.
 """
 
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QMessageBox, QRadioButton, QButtonGroup, QTextEdit, QTabWidget, QCheckBox, QWidget
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QThread
 from typing import Optional
 
 
@@ -113,6 +113,7 @@ class SettingsDialog(QDialog):
     def setup_models_tab(self) -> None:
         """
         Sets up the Models tab with API keys and model selection.
+        Loads models from cache first, then triggers background refresh.
         """
         models_widget = QWidget()
         layout = QVBoxLayout()
@@ -146,7 +147,15 @@ class SettingsDialog(QDialog):
 
         model_layout.addWidget(QLabel("Default Model:"))
         self.model_combo = QComboBox()
-        self.model_combo.addItems(self.llm_interface.get_available_models())
+
+        # Load models from cache first for instant UI
+        cached_models, _ = self.llm_interface._load_models_from_cache()
+        if cached_models:
+            self.model_combo.addItems(cached_models)
+        else:
+            # Fallback to basic models if no cache
+            self.model_combo.addItems(["ollama:llama3.2:latest"])
+
         model_layout.addWidget(self.model_combo)
 
         model_group.setLayout(model_layout)
@@ -155,6 +164,9 @@ class SettingsDialog(QDialog):
         layout.addStretch()  # Push content to top
         models_widget.setLayout(layout)
         self.tab_widget.addTab(models_widget, "Models")
+
+        # Start background refresh of models
+        self.start_background_model_fetch()
 
     def setup_prompts_tab(self) -> None:
         """
@@ -300,6 +312,59 @@ class SettingsDialog(QDialog):
         self.settings_changed.emit()
         QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")
         self.accept()
+
+    def start_background_model_fetch(self) -> None:
+        """
+        Starts background fetching of models using a separate thread.
+        """
+        try:
+            from .llm_interface import ModelFetcher
+
+            # Create the fetcher and thread
+            self.model_fetcher = ModelFetcher(self.llm_interface)
+            self.model_thread = QThread()
+
+            # Move fetcher to thread
+            self.model_fetcher.moveToThread(self.model_thread)
+
+            # Connect signals
+            self.model_thread.started.connect(self.model_fetcher.fetch_models)
+            self.model_fetcher.models_ready.connect(self.on_models_updated)
+
+            # Clean up thread when done
+            self.model_fetcher.models_ready.connect(self.model_thread.quit)
+            self.model_thread.finished.connect(self.model_thread.deleteLater)
+            self.model_thread.finished.connect(self.model_fetcher.deleteLater)
+
+            # Start the thread
+            self.model_thread.start()
+
+        except ImportError:
+            # PyQt not available, skip background fetching
+            pass
+
+    def on_models_updated(self, models: list[str]) -> None:
+        """
+        Slot called when fresh models are available from background fetch.
+
+        Args:
+            models: List of model identifiers
+        """
+        if not models:
+            return
+
+        # Store current selection
+        current_selection = self.model_combo.currentText()
+
+        # Update the combo box with fresh models
+        self.model_combo.clear()
+        self.model_combo.addItems(models)
+
+        # Restore selection if still available
+        if current_selection:
+            index = self.model_combo.findText(current_selection)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
 
     def on_startup_checkbox_changed(self, state: int) -> None:
         """
