@@ -183,3 +183,12 @@ class ConfigManager:
             str: Path to tesseract.exe or empty string if not set.
         """
         return self.get("tesseract_cmd", "")
+
+    def get_app_data_path(self) -> str:
+        """
+        Gets the path to the application's data folder in AppData/Roaming.
+
+        Returns:
+            str: Path to the app data directory.
+        """
+        return get_app_data_path()

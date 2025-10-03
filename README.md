@@ -5,10 +5,12 @@ Blink is a Windows application that allows users to quickly capture selected tex
 ## Features
 
 - **Global Hotkey Listener**: Press `Ctrl + Alt + .` anywhere in Windows to trigger text capture.
-- **Clipboard Context Mode**: Press `Ctrl + Alt + /` to use clipboard content as context for selected text instructions.
+- **Adaptive Multimodal Input**: Intelligent clipboard processing that automatically handles mixed content types (text, images, documents) and adapts based on AI model capabilities.
+- **Clipboard Context Mode**: Press `Ctrl + Alt + /` to use clipboard content as context for selected text instructions - now supports images and documents!
+- **OCR Support**: Automatic text extraction from images for text-only AI models when Tesseract is installed.
 - **Conversational Memory**: Maintains context across multiple queries for natural follow-up conversations.
 - **Text Capture**: Captures selected text using clipboard manipulation.
-- **Multi-Model Support**: Works with Ollama (local), OpenAI, Google Gemini, and LM Studio.
+- **Multi-Model Support**: Works with Ollama (local), OpenAI, Google Gemini, and LM Studio with automatic multimodal capability detection.
 - **Streaming GUI Overlay**: Displays AI responses in real-time in a frameless window.
 - **System Tray Controls**: Access settings and memory controls via the system tray icon.
 - **Memory Management**: Enable/disable memory, adjust history length (5-200 messages), and clear history.
@@ -21,6 +23,7 @@ Blink is a Windows application that allows users to quickly capture selected tex
 - Python 3.10+
 - Local Ollama instance running (default: http://localhost:11434)
 - Windows OS
+- **Optional**: Tesseract OCR for image text extraction (see installation below)
 
 ## Installation
 
@@ -71,6 +74,53 @@ The AI will execute your instruction on the clipboard content. For example:
 - Clipboard: Long article + Selection: "give me a 2-sentence summary" → Concise summary
 
 This feature includes retry logic and works with all supported AI models and output modes.
+
+### Adaptive Multimodal Input
+
+Blink now intelligently handles mixed clipboard content types and adapts processing based on your AI model's capabilities:
+
+#### Multimodal Models (Vision-Capable)
+When using models like GPT-4 Vision, Gemini Pro, or Ollama Llava:
+- **Images**: Sent directly as base64-encoded data to the AI
+- **Documents**: Text content extracted and included
+- **Mixed Content**: All content types combined in a single multimodal prompt
+
+#### Text-Only Models (with OCR)
+When using models like Llama3 or other text-only AIs:
+- **Images**: Automatically processed with OCR to extract text (requires Tesseract)
+- **Documents**: Text content extracted normally
+- **Fallback**: Graceful handling when OCR is unavailable
+
+#### Examples:
+- **Copy an image** + select "describe this image" → AI analyzes the visual content
+- **Copy a PDF** + select "summarize this document" → AI processes the text content
+- **Copy multiple files** (image + document) → AI handles both appropriately
+- **Copy screenshot** + select "extract the text from this image" → OCR extracts readable text
+
+#### Tesseract OCR Installation (Optional)
+
+For image text extraction with text-only models:
+
+1. **Download Tesseract**:
+   ```bash
+   # Option 1: Windows Installer (Recommended)
+   # Download from: https://github.com/UB-Mannheim/tesseract/wiki
+   # Run the installer - it adds Tesseract to your PATH automatically
+
+   # Option 2: Chocolatey (if installed)
+   choco install tesseract
+   ```
+
+2. **Verify Installation**:
+   ```bash
+   tesseract --version
+   ```
+
+3. **Custom Path** (if needed):
+   - If Tesseract isn't in PATH, set `tesseract_cmd` in Blink settings to the full path to `tesseract.exe`
+   - Usually: `C:\Program Files\Tesseract-OCR\tesseract.exe`
+
+**Note**: OCR is completely optional - Blink works perfectly without it, but provides enhanced capabilities when Tesseract is available.
 
 ### Memory Controls
 

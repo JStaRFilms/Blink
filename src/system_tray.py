@@ -4,7 +4,7 @@ System tray module for Blink.
 Manages the system tray icon and menu for application control.
 """
 
-from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication, QStyle, QSpinBox, QWidgetAction, QLabel
+from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication, QStyle, QSpinBox, QWidgetAction, QLabel, QFileDialog
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import pyqtSignal, QObject
 from typing import Optional
@@ -115,6 +115,11 @@ class SystemTrayManager(QObject):
         clear_action.triggered.connect(self.clear_history)
         memory_menu.addAction(clear_action)
 
+        # Export history action
+        export_action = QAction("Export Conversation...", self.app)
+        export_action.triggered.connect(self.export_history)
+        memory_menu.addAction(export_action)
+
     def toggle_memory(self) -> None:
         """Toggles memory on/off."""
         if self.config_manager:
@@ -142,6 +147,31 @@ class SystemTrayManager(QObject):
             self.show_message("Memory", "Conversation history cleared", QSystemTrayIcon.MessageIcon.Information)
         except ImportError:
             pass
+
+    def export_history(self) -> None:
+        """Exports the conversation history to a file."""
+        try:
+            from .history_manager import get_conversation_history
+            history = get_conversation_history(self.config_manager)
+
+            # Open file dialog for save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                None,  # parent widget
+                "Export Conversation",  # dialog title
+                "conversation.txt",  # default filename
+                "Text Files (*.txt);;Markdown Files (*.md);;All Files (*)"  # file filters
+            )
+
+            if file_path:  # User didn't cancel
+                success = history.export_history(file_path)
+                if success:
+                    self.show_message("Export", "Conversation exported successfully", QSystemTrayIcon.MessageIcon.Information)
+                else:
+                    self.show_message("Export", "Failed to export conversation", QSystemTrayIcon.MessageIcon.Warning)
+        except ImportError:
+            self.show_message("Export", "Export feature not available", QSystemTrayIcon.MessageIcon.Warning)
+        except Exception as e:
+            self.show_message("Export", f"Export failed: {str(e)}", QSystemTrayIcon.MessageIcon.Warning)
 
     def show_message(self, title: str, message: str, icon: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information) -> None:
         """

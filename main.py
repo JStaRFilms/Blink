@@ -13,6 +13,7 @@ from src.hotkey_manager import HotkeyManager
 from src.config_manager import ConfigManager
 from src.system_tray import SystemTrayManager
 from src.settings_dialog import SettingsDialog
+from src.history_manager import get_conversation_history
 
 
 def main() -> None:
@@ -53,6 +54,16 @@ def main() -> None:
 
     # Start the hotkey listener
     hotkey_manager.start()
+
+    # Connect application shutdown to save history
+    def save_history_on_quit():
+        try:
+            history_manager = get_conversation_history(config_manager)
+            history_manager.save_history()
+        except Exception as e:
+            print(f"Warning: Could not save history on shutdown: {e}")
+
+    app.aboutToQuit.connect(save_history_on_quit)
 
     # Run the Qt event loop
     sys.exit(app.exec())

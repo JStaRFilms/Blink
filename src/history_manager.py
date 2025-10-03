@@ -1,11 +1,13 @@
 """
 History manager module for Blink.
 
-Manages conversational memory using an in-memory capped deque.
+Manages conversational memory using an in-memory capped deque with persistent storage.
 """
 
+import json
+import os
 from collections import deque
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class ConversationHistory:
@@ -13,7 +15,8 @@ class ConversationHistory:
     Manages conversation history using a capped deque for memory efficiency.
 
     Stores the last N messages in the conversation, automatically
-    dropping the oldest when the limit is exceeded.
+    dropping the oldest when the limit is exceeded. Now includes persistent
+    storage to disk for conversation continuity across application restarts.
     """
 
     def __init__(self, config_manager=None, maxlen: int = 50) -> None:
@@ -21,7 +24,7 @@ class ConversationHistory:
         Initializes the conversation history.
 
         Args:
-            config_manager: Configuration manager to get memory settings from.
+            config_manager: Configuration manager to get memory settings and paths from.
             maxlen (int): Maximum number of messages to store. Defaults to 50.
                          For modern LLMs (256k-1M+ context), 50 messages provides
                          excellent context depth while keeping conversations focused
@@ -30,12 +33,24 @@ class ConversationHistory:
         self.config_manager = config_manager
         self._maxlen = maxlen
         self.history = deque(maxlen=self._get_maxlen())
+        self.history_file = self._get_history_file_path()
+
+        # Load existing history from disk
+        self.load_history()
 
     def _get_maxlen(self) -> int:
         """Gets the maximum length from config or default."""
         if self.config_manager:
             return self.config_manager.get("memory_max_messages", self._maxlen)
         return self._maxlen
+
+    def _get_history_file_path(self) -> str:
+        """Gets the file path for storing conversation history."""
+        if self.config_manager:
+            app_data_path = self.config_manager.get_app_data_path()
+            return os.path.join(app_data_path, "chat_history.json")
+        # Fallback if no config manager
+        return "chat_history.json"
 
     def update_maxlen(self) -> None:
         """Updates the maxlen if config changed."""
@@ -65,11 +80,92 @@ class ConversationHistory:
         """
         return list(self.history)
 
+    def load_history(self) -> None:
+        """
+        Loads conversation history from the JSON file.
+        If the file doesn't exist or is corrupted, starts with empty history.
+        """
+        if not os.path.exists(self.history_file):
+            return  # No file to load, start fresh
+
+        try:
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    # Validate and load messages
+                    valid_messages = []
+                    for item in data:
+                        if isinstance(item, dict) and 'role' in item and 'content' in item:
+                            if item['role'] in ['user', 'assistant'] and isinstance(item['content'], str):
+                                valid_messages.append(item)
+                    # Load into deque, respecting maxlen
+                    self.history.extend(valid_messages[-self.history.maxlen:])
+        except (json.JSONDecodeError, IOError, KeyError) as e:
+            print(f"Warning: Could not load history file ({e}), starting with empty history")
+            # Start with empty history if file is corrupted
+
+    def save_history(self) -> None:
+        """
+        Saves the current conversation history to the JSON file.
+        """
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(list(self.history), f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            print(f"Warning: Could not save history file ({e})")
+
+    def clear_history(self) -> None:
+        """
+        Clears all conversation history from memory and deletes the history file.
+        """
+        self.history.clear()
+        if os.path.exists(self.history_file):
+            try:
+                os.remove(self.history_file)
+            except OSError:
+                pass  # Ignore if we can't delete the file
+
+    def export_history(self, file_path: str) -> bool:
+        """
+        Exports the conversation history to a file.
+
+        Args:
+            file_path (str): Path to export file (.txt or .md)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Determine format from file extension
+            _, ext = os.path.splitext(file_path.lower())
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                if ext == '.md':
+                    # Markdown format
+                    for message in self.history:
+                        role = message['role']
+                        content = message['content']
+                        if role == 'user':
+                            f.write(f"**User:**\n\n> {content}\n\n---\n\n")
+                        elif role == 'assistant':
+                            f.write(f"**Assistant:**\n\n> {content}\n\n---\n\n")
+                else:
+                    # Default to .txt format
+                    for message in self.history:
+                        role = message['role'].upper()
+                        content = message['content']
+                        f.write(f"{role}: {content}\n\n")
+            return True
+        except IOError:
+            return False
+
     def clear(self) -> None:
         """
         Clears all conversation history.
         """
-        self.history.clear()
+        self.clear_history()
 
     def is_empty(self) -> bool:
         """
