@@ -6,7 +6,7 @@ Handles loading and saving user settings, including error recovery options.
 
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Define the application name and the config file name
 APP_NAME = "Blink"
@@ -38,11 +38,14 @@ class ConfigManager:
         config (Dict[str, Any]): Dictionary holding configuration data.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: Optional[str] = None) -> None:
         """
         Initializes the ConfigManager.
+
+        Args:
+            config_path (Optional[str]): Custom path to config file. If None, uses default path.
         """
-        self.config_path = get_config_path()
+        self.config_path = config_path or get_config_path()
         self.config: Dict[str, Any] = {}
         self.load_config()
         self._ensure_defaults()
@@ -56,7 +59,7 @@ class ConfigManager:
             "enable_error_logging": True,
             "log_to_file": False,
             "log_file_path": "blink_errors.log",
-            "streaming_timeout": 300,  # seconds
+            "streaming_timeout": 120,  # seconds
             "enable_retry": True,
             "max_retries": 5,
             "clipboard_context_hotkey": "ctrl+alt+/",
@@ -128,34 +131,54 @@ class ConfigManager:
         self.config[key] = value
         self.save_config()
     
-    def is_multimodal_model(self, model_name: str) -> bool:
+    def is_multimodal_model(self, full_model_name: str) -> bool:
         """
-        Checks if a model supports multimodal input.
-        
+        Enhanced multimodal detection supporting local model heuristics.
+
         Args:
-            model_name (str): The model name to check.
-            
+            full_model_name (str): Full model identifier (e.g., "ollama:llava" or "openai:gpt-4o")
+
         Returns:
             bool: True if the model is multimodal, False otherwise.
         """
+        # Handle full model identifiers like "ollama:llava" or "openai:gpt-4o"
+        if ":" in full_model_name:
+            provider, model_id = full_model_name.split(":", 1)
+            model_id_lower = model_id.lower()
+
+            # Local models: use name heuristics
+            if provider == "ollama":
+                vision_keywords = ["llava", "moondream", "bakllava", "vision", "cogvlm", "llama-vision", "gemma"]
+                return any(kw in model_id_lower for kw in vision_keywords)
+            elif provider == "lmstudio":
+                # LM Studio models often mirror HuggingFace names
+                vision_keywords = ["llava", "moondream", "vision", "bakllava", "gemma"]
+                return any(kw in model_id_lower for kw in vision_keywords)
+
+            # Cloud models: fall through to legacy check using model_id
+            model_name_to_check = model_id
+        else:
+            model_name_to_check = full_model_name
+
+        # Legacy fallback for cloud models (gemini, gpt-4o, etc.)
         multimodal_models = self.get("multimodal_models", {})
-        model_name_lower = model_name.lower()
-        
-        # Check for exact matches
+        model_name_lower = model_name_to_check.lower()
         if model_name_lower in multimodal_models:
             return multimodal_models[model_name_lower]
-        
-        # Check for partial matches
         for model_key in multimodal_models:
             if model_key in model_name_lower:
                 return multimodal_models[model_key]
-                
         return False
     
+    def get_current_model_is_multimodal(self) -> bool:
+        """Determines if the currently selected model is multimodal using heuristics."""
+        selected_model = self.get("selected_model", "ollama:llama3.2:latest")
+        return self.is_multimodal_model(selected_model)
+
     def get_tesseract_cmd(self) -> str:
         """
         Gets the Tesseract command path.
-        
+
         Returns:
             str: Path to tesseract.exe or empty string if not set.
         """

@@ -155,12 +155,9 @@ class HotkeyManager:
         try:
             # Add a small delay to ensure keys are released
             time.sleep(0.2)
-
-            # Get config
             output_mode = self.config_manager.get("output_mode", "popup")
             enable_retry = self.config_manager.get("enable_retry", True)
             max_retries = self.config_manager.get("max_retries", 2)
-
             attempt = 0
             success = False
 
@@ -168,263 +165,42 @@ class HotkeyManager:
                 if attempt > 0:
                     logger.info(f"Clipboard context retry attempt {attempt} of {max_retries}")
                     time.sleep(0.3)
-
                 try:
-                    # Get clipboard content using clipboard manager with robust type detection
                     clipboard_manager = ClipboardManager()
-                    content_type = clipboard_manager.get_clipboard_content_type()
-
-                    clipboard_content = None
-                    image_data = None
-
-                    if content_type == ClipboardContentType.FILE:
-                        file_path = clipboard_manager.get_file_path_from_clipboard()
-                        if not file_path or not os.path.exists(file_path):
-                            logger.warning(f"No valid file path found on clipboard (attempt {attempt + 1}/{max_retries + 1})")
-                            attempt += 1
-                            continue
-                        logger.debug(f"Detected file via CF_HDROP on clipboard: {file_path}")
-                        
-                        # Check if it's an image file
-                        if self.file_reader.is_image_file(file_path):
-                            # For image files, check if model supports multimodal input
-                            if self.llm_interface.is_multimodal():
-                                logger.debug(f"Processing image file for multimodal model: {file_path}")
-                                try:
-                                    image_data, mime_type = self.file_reader.get_image_data(file_path)
-                                    logger.debug(f"Successfully extracted image data ({len(image_data)} characters)")
-                                except (ValueError, FileNotFoundError, PermissionError) as e:
-                                    logger.warning(f"Could not read image file {file_path}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                    attempt += 1
-                                    continue
-                            else:
-                                # For text-only models, use OCR
-                                logger.debug(f"Processing image file with OCR: {file_path}")
-                                try:
-                                    clipboard_content = self.file_reader.read_text_from_file(file_path)
-                                    logger.debug(f"Successfully OCR'd image to text ({len(clipboard_content)} characters)")
-                                except (ValueError, FileNotFoundError, PermissionError) as e:
-                                    logger.warning(f"Could not OCR image file {file_path}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                    attempt += 1
-                                    continue
-                        else:
-                            # For non-image files, read as text
-                            logger.debug(f"Processing text file: {file_path}")
-                            try:
-                                clipboard_content = self.file_reader.read_text_from_file(file_path)
-                                logger.debug(f"Successfully read file content ({len(clipboard_content)} characters)")
-                            except (ValueError, FileNotFoundError, PermissionError) as e:
-                                logger.warning(f"Could not read file {file_path}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                attempt += 1
-                                continue
-
-                    elif content_type == ClipboardContentType.TEXT:
-                        text_content = clipboard_manager.get_text_from_clipboard()
-                        if not text_content or not text_content.strip():
-                            logger.warning(f"Clipboard text is empty (attempt {attempt + 1}/{max_retries + 1})")
-                            attempt += 1
-                            continue
-
-                        text_content_stripped = text_content.strip()
-                        is_file_path = (
-                            len(text_content_stripped) > 0 and (
-                                text_content_stripped.startswith('/') or
-                                text_content_stripped.startswith('\\') or
-                                (len(text_content_stripped) > 3 and text_content_stripped[1:3] == ':\\') or
-                                (len(text_content_stripped) > 2 and text_content_stripped[0] == '.' and text_content_stripped[1] in '/\\')
-                            ) and os.path.exists(text_content_stripped)
-                        )
-
-                        if is_file_path:
-                            logger.debug(f"Detected file path in text clipboard: {text_content_stripped}")
-                            
-                            # Check if it's an image file
-                            if self.file_reader.is_image_file(text_content_stripped):
-                                # For image files, check if model supports multimodal input
-                                if self.llm_interface.is_multimodal():
-                                    logger.debug(f"Processing image file for multimodal model: {text_content_stripped}")
-                                    try:
-                                        image_data, mime_type = self.file_reader.get_image_data(text_content_stripped)
-                                        logger.debug(f"Successfully extracted image data ({len(image_data)} characters)")
-                                    except (ValueError, FileNotFoundError, PermissionError) as e:
-                                        logger.warning(f"Could not read image file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                        attempt += 1
-                                        continue
-                                else:
-                                    # For text-only models, use OCR
-                                    logger.debug(f"Processing image file with OCR: {text_content_stripped}")
-                                    try:
-                                        clipboard_content = self.file_reader.read_text_from_file(text_content_stripped)
-                                        logger.debug(f"Successfully OCR'd image to text ({len(clipboard_content)} characters)")
-                                    except (ValueError, FileNotFoundError, PermissionError) as e:
-                                        logger.warning(f"Could not OCR image file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                        attempt += 1
-                                        continue
-                            else:
-                                # For non-image files, read as text
-                                logger.debug(f"Processing text file: {text_content_stripped}")
-                                try:
-                                    clipboard_content = self.file_reader.read_text_from_file(text_content_stripped)
-                                    logger.debug(f"Successfully read file content ({len(clipboard_content)} characters)")
-                                except (ValueError, FileNotFoundError, PermissionError) as e:
-                                    logger.warning(f"Could not read file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                    attempt += 1
-                                    continue
-                        else:
-                            clipboard_content = text_content
-                            logger.debug(f"Detected regular text on clipboard ({len(clipboard_content)} characters)")
-
-                    elif content_type == ClipboardContentType.IMAGE:
-                        # For images, check if model supports multimodal input
-                        if self.llm_interface.is_multimodal():
-                            logger.debug("Processing clipboard image for multimodal model")
-                            image = clipboard_manager.get_image_from_clipboard()
-                            if image is None:
-                                logger.warning(f"Could not retrieve image from clipboard (attempt {attempt + 1}/{max_retries + 1})")
-                                attempt += 1
-                                continue
-                            try:
-                                image_data, mime_type = self.file_reader.get_pil_image_data(image)
-                                logger.debug(f"Successfully extracted image data ({len(image_data)} characters)")
-                            except (ValueError, ImportError) as e:
-                                logger.warning(f"Could not process clipboard image: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                attempt += 1
-                                continue
-                        else:
-                            # For text-only models, use OCR
-                            logger.debug("Processing clipboard image with OCR")
-                            image = clipboard_manager.get_image_from_clipboard()
-                            if image is None:
-                                logger.warning(f"Could not retrieve image from clipboard (attempt {attempt + 1}/{max_retries + 1})")
-                                attempt += 1
-                                continue
-                            try:
-                                clipboard_content = self.file_reader.read_text_from_image(image)
-                                if not clipboard_content or not clipboard_content.strip():
-                                    logger.warning(f"OCR returned no text (attempt {attempt + 1}/{max_retries + 1})")
-                                    attempt += 1
-                                    continue
-                                logger.debug(f"Successfully OCR'd image to text ({len(clipboard_content)} characters)")
-                            except (ValueError, ImportError) as e:
-                                logger.warning(f"Could not OCR image from clipboard: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                attempt += 1
-                                continue
-
-                    else:
-                        # UNKNOWN: try to fall back to text anyway
-                        text_content = clipboard_manager.get_text_from_clipboard()
-                        if text_content and text_content.strip():
-                            text_content_stripped = text_content.strip()
-                            is_file_path = (
-                                len(text_content_stripped) > 0 and (
-                                    text_content_stripped.startswith('/') or
-                                    text_content_stripped.startswith('\\') or
-                                    (len(text_content_stripped) > 3 and text_content_stripped[1:3] == ':\\') or
-                                    (len(text_content_stripped) > 2 and text_content_stripped[0] == '.' and text_content_stripped[1] in '/\\')
-                                ) and os.path.exists(text_content_stripped)
-                            )
-                            if is_file_path:
-                                logger.debug(f"Detected file path when falling back to text: {text_content_stripped}")
-                                
-                                # Check if it's an image file
-                                if self.file_reader.is_image_file(text_content_stripped):
-                                    # For image files, check if model supports multimodal input
-                                    if self.llm_interface.is_multimodal():
-                                        logger.debug(f"Processing image file for multimodal model: {text_content_stripped}")
-                                        try:
-                                            image_data, mime_type = self.file_reader.get_image_data(text_content_stripped)
-                                            logger.debug(f"Successfully extracted image data ({len(image_data)} characters)")
-                                        except (ValueError, FileNotFoundError, PermissionError) as e:
-                                            logger.warning(f"Could not read image file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                            attempt += 1
-                                            continue
-                                    else:
-                                        # For text-only models, use OCR
-                                        logger.debug(f"Processing image file with OCR: {text_content_stripped}")
-                                        try:
-                                            clipboard_content = self.file_reader.read_text_from_file(text_content_stripped)
-                                            logger.debug(f"Successfully OCR'd image to text ({len(clipboard_content)} characters)")
-                                        except (ValueError, FileNotFoundError, PermissionError) as e:
-                                            logger.warning(f"Could not OCR image file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                            attempt += 1
-                                            continue
-                                else:
-                                    # For non-image files, read as text
-                                    logger.debug(f"Processing text file: {text_content_stripped}")
-                                    try:
-                                        clipboard_content = self.file_reader.read_text_from_file(text_content_stripped)
-                                        logger.debug(f"Successfully read file content ({len(clipboard_content)} characters)")
-                                    except (ValueError, FileNotFoundError, PermissionError) as e:
-                                        logger.warning(f"Could not read file {text_content_stripped}: {e} (attempt {attempt + 1}/{max_retries + 1})")
-                                        attempt += 1
-                                        continue
-                            else:
-                                clipboard_content = text_content
-                                logger.debug(f"Falling back to text clipboard content ({len(clipboard_content)} characters)")
-                        else:
-                            logger.warning(f"Unsupported or empty clipboard content type: {content_type.value} (attempt {attempt + 1}/{max_retries + 1})")
-                            attempt += 1
-                            continue
-
-                    # Get selected instruction text
-                    selected_instruction = self.text_capturer.capture_selected_text()
-                    if not selected_instruction or not selected_instruction.strip():
-                        logger.warning(f"No instruction text selected (attempt {attempt + 1}/{max_retries + 1})")
+                    clipboard_items = clipboard_manager.get_clipboard_items()
+                    if not clipboard_items:
+                        logger.warning(f"No clipboard items found (attempt {attempt + 1})")
                         attempt += 1
                         continue
 
-                    logger.debug(f"Captured instruction: {selected_instruction[:50]}..." if len(selected_instruction) > 50 else f"Captured instruction: {selected_instruction}")
+                    selected_instruction = self.text_capturer.capture_selected_text()
+                    if not selected_instruction or not selected_instruction.strip():
+                        logger.warning(f"No instruction text selected (attempt {attempt + 1})")
+                        attempt += 1
+                        continue
 
-                    # Format the final prompt
-                    if image_data:
-                        # For multimodal models, include image data
-                        final_prompt = self._format_multimodal_prompt(selected_instruction, image_data, mime_type)
-                    else:
-                        # For text-only content or OCR results
-                        final_prompt = f"""
-Please execute the following instruction:
----
-{selected_instruction}
----
-
-Apply the instruction to the following text content:
----
-{clipboard_content}
----
-"""
-
-                    logger.debug(f"Clipboard context prompt formatted: {final_prompt[:100]}...")
-
-                    # Process the query using existing logic
-                    success = self._process_clipboard_context_query(final_prompt, output_mode, image_data is not None)
-
+                    success = self._process_adaptive_clipboard_query(
+                        clipboard_items, selected_instruction, output_mode
+                    )
                     if not success and enable_retry:
-                        logger.info(f"Clipboard context query processing failed, will retry if attempts remain")
-
+                        logger.info("Will retry clipboard context query")
                 except Exception as e:
-                    logger.error(f"Error during clipboard context processing (attempt {attempt + 1}): {e}")
+                    logger.error(f"Error in clipboard context (attempt {attempt + 1}): {e}")
                     success = False
-
                 attempt += 1
 
             if not success:
-                logger.error("Failed to process clipboard context after all retry attempts")
+                logger.error("Failed after all retries")
                 if output_mode == "popup":
-                    try:
-                        self.overlay_ui.reset_signal.emit()
-                        self.overlay_ui.show_signal.emit()
-                        self.overlay_ui.append_signal.emit(
-                            "❌ Failed to process clipboard context after multiple attempts.\n"
-                            "Check console for details."
-                        )
-                    except Exception as e:
-                        logger.error(f"Error showing error message: {e}")
-
+                    self.overlay_ui.reset_signal.emit()
+                    self.overlay_ui.show_signal.emit()
+                    self.overlay_ui.append_signal.emit(
+                        "❌ Failed to process clipboard context after multiple attempts.\n"
+                        "Check console for details."
+                    )
         except Exception as e:
             logger.error(f"Unexpected error in process_clipboard_context: {e}")
-
         finally:
-            # Ensure keys are released
             kb.release('ctrl')
             kb.release('alt')
             kb.release('/')
@@ -873,6 +649,48 @@ Apply the instruction to the following text content:
                 self.overlay_ui.append_signal.emit(f"\n\n❌ Error: {str(e)}")
             except Exception:
                 pass
+            return False
+
+    def _process_adaptive_clipboard_query(self, clipboard_items, user_query, output_mode):
+        """Delegates to LLMInterface's adaptive query."""
+        timeout = self.config_manager.get("streaming_timeout", 120)
+        full_response = []
+        received_data = False
+
+        def on_chunk(chunk: str):
+            nonlocal received_data
+            received_data = True
+            full_response.append(chunk)
+            if output_mode == "popup":
+                self.overlay_ui.append_signal.emit(chunk)
+
+        try:
+            if output_mode == "popup":
+                self.overlay_ui.reset_signal.emit()
+                self.overlay_ui.show_signal.emit()
+
+            self.llm_interface.query_with_context(clipboard_items, user_query, on_chunk)
+
+            if not received_data:
+                if output_mode == "popup":
+                    self.overlay_ui.append_signal.emit("\n❌ No response from LLM.")
+                return False
+
+            # Save to history
+            if self.config_manager.get("memory_enabled", True):
+                from .history_manager import get_conversation_history
+                history = get_conversation_history(self.config_manager)
+                # Simplified user representation
+                user_repr = f"Query: {user_query[:50]}... with {len(clipboard_items)} items"
+                history.add_message("user", user_repr)
+                history.add_message("assistant", "".join(full_response))
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Adaptive query failed: {e}")
+            if output_mode == "popup":
+                self.overlay_ui.append_signal.emit(f"\n❌ Error: {e}")
             return False
 
     def retry_last_query(self) -> None:

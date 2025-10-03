@@ -5,7 +5,7 @@ Handles detecting and extracting different types of clipboard content including 
 """
 
 import enum
-from typing import Optional, List
+from typing import Optional, List, Dict
 import win32clipboard
 import pyperclip
 import time
@@ -112,29 +112,26 @@ class ClipboardManager:
         except Exception:
             return ""
 
-    def get_file_path_from_clipboard(self) -> Optional[str]:
-        """
-        Gets the file path from the clipboard if it contains file data.
-
-        Returns:
-            Optional[str]: The file path, or None if no file found.
-        """
+    def get_file_paths_from_clipboard(self) -> List[str]:
+        """Returns all file paths from clipboard (CF_HDROP)."""
         if self._open_clipboard_with_retries():
             try:
                 if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_HDROP):
                     try:
                         files = win32clipboard.GetClipboardData(win32clipboard.CF_HDROP)
-                        # pywin32 returns a list/tuple of file paths
-                        if files:
-                            return files[0]
+                        return list(files) if files else []
                     except Exception:
-                        pass
-                return None
+                        return []
             finally:
                 try:
                     win32clipboard.CloseClipboard()
                 except Exception:
                     pass
+        return []
+
+    def get_file_path_from_clipboard(self) -> Optional[str]:
+        paths = self.get_file_paths_from_clipboard()
+        return paths[0] if paths else None
 
     def get_image_from_clipboard(self):
         """
@@ -186,3 +183,25 @@ class ClipboardManager:
         else:
             # For images or unknown types, return empty string
             return ""
+
+    def get_clipboard_items(self) -> List[Dict[str, str]]:
+        """Returns structured list of clipboard items."""
+        content_type = self.get_clipboard_content_type()
+        items = []
+
+        if content_type == ClipboardContentType.FILE:
+            file_paths = self.get_file_paths_from_clipboard()
+            for path in file_paths:
+                if path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    items.append({"type": "image", "path": path})
+                else:
+                    items.append({"type": "document", "path": path})
+        elif content_type == ClipboardContentType.IMAGE:
+            # Single image from clipboard (not file)
+            items.append({"type": "image", "path": "__clipboard_image__"})
+        elif content_type == ClipboardContentType.TEXT:
+            text = self.get_text_from_clipboard()
+            if text.strip():
+                items.append({"type": "text", "content": text})
+
+        return items

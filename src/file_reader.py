@@ -15,9 +15,21 @@ class FileReader:
     Reads text content from various file types.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config_manager=None) -> None:
         """Initialize the file reader."""
-        pass
+        self.config_manager = config_manager
+        if config_manager:
+            try:
+                tesseract_cmd = config_manager.get_tesseract_cmd()
+                if tesseract_cmd and isinstance(tesseract_cmd, str) and os.path.exists(tesseract_cmd):
+                    try:
+                        import pytesseract
+                        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+                    except ImportError:
+                        pass
+            except (AttributeError, TypeError):
+                # Handle case where config_manager is a Mock or doesn't have the method
+                pass
 
     def _configure_tesseract(self) -> None:
         """
@@ -335,3 +347,26 @@ class FileReader:
 
         except Exception as e:
             raise ValueError(f"Could not read DOCX file {file_path}: {e}")
+
+    def extract_text_from_image(self, image_path: str) -> str:
+        """Uses pytesseract to extract text from an image file."""
+        try:
+            from PIL import Image
+            import pytesseract
+        except ImportError as e:
+            raise ImportError(f"pytesseract or Pillow not installed: {e}")
+
+        # Configure tesseract if needed
+        self._configure_tesseract()
+
+        try:
+            image = Image.open(image_path)
+            return pytesseract.image_to_string(image)
+        except Exception as e:
+            raise ValueError(f"Could not extract text from image {image_path}: {e}")
+
+    def get_file_type(self, file_path: str) -> str:
+        """Returns 'image' or 'document' based on file extension."""
+        if self.is_image_file(file_path):
+            return "image"
+        return "document"

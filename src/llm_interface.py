@@ -7,6 +7,7 @@ Provides a unified interface for communicating with LLMs, supporting Ollama and 
 import json
 import requests
 import time
+import base64
 from typing import Callable, Optional, Dict, Any, List, Union
 try:
     from openai import OpenAI
@@ -19,6 +20,9 @@ try:
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
+
+from .file_reader import FileReader
+from .clipboard_manager import ClipboardManager
 
 
 class LLMConnectionError(Exception):
@@ -77,6 +81,8 @@ class LLMInterface:
                 self.gemini_available = False
         else:
             self.gemini_available = False
+
+        self.file_reader = FileReader(self.config_manager)
 
     def set_selected_model(self, model: str) -> None:
         """
@@ -422,3 +428,88 @@ class LLMInterface:
         """
         self._cached_models = None
         self._models_cache_time = None
+
+    def query_with_context(self, clipboard_items: List[Dict[str, str]], user_query: str, on_chunk: Callable[[str], None]) -> None:
+        """Adaptive query router based on multimodal capability."""
+        if not self.config_manager:
+            on_chunk("Error: Config manager not available")
+            return
+
+        is_multimodal = self.config_manager.get_current_model_is_multimodal()
+        system_prompt = self.config_manager.get("system_prompt", "").strip()
+        system_messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
+
+        memory_enabled = self.config_manager.get("memory_enabled", True)
+        if memory_enabled:
+            from .history_manager import get_conversation_history
+            history_manager = get_conversation_history(self.config_manager)
+            current_history = history_manager.get_history()
+        else:
+            current_history = []
+
+        if is_multimodal:
+            # Multimodal path: preserve images as base64, docs as text
+            content_parts = []
+            if user_query.strip():
+                content_parts.append({"type": "text", "text": user_query})
+
+            for item in clipboard_items:
+                if item["type"] == "document":
+                    try:
+                        text = self.file_reader.read_text_from_file(item["path"])
+                        if text.strip():
+                            content_parts.append({"type": "text", "text": text})
+                    except Exception as e:
+                        content_parts.append({"type": "text", "text": f"[Error reading {item['path']}: {e}]"})
+                elif item["type"] == "image":
+                    try:
+                        if item["path"] == "__clipboard_image__":
+                            image = ClipboardManager().get_image_from_clipboard()
+                            if image:
+                                encoded, mime = self.file_reader.get_pil_image_data(image)
+                            else:
+                                raise ValueError("No image on clipboard")
+                        else:
+                            encoded, mime = self.file_reader.get_image_data(item["path"])
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{encoded}"}
+                        })
+                    except Exception as e:
+                        content_parts.append({"type": "text", "text": f"[Error processing image {item['path']}: {e}]"})
+                elif item["type"] == "text":
+                    content_parts.append({"type": "text", "text": item["content"]})
+
+            user_message = {"role": "user", "content": content_parts}
+            messages_to_send = system_messages + current_history + [user_message]
+
+        else:
+            # Text-only path: OCR images, extract text from docs
+            all_text = []
+            if user_query.strip():
+                all_text.append(f"Instruction:\n{user_query}\n\nContext:\n")
+
+            for item in clipboard_items:
+                try:
+                    if item["type"] == "document":
+                        text = self.file_reader.read_text_from_file(item["path"])
+                    elif item["type"] == "image":
+                        if item["path"] == "__clipboard_image__":
+                            image = ClipboardManager().get_image_from_clipboard()
+                            text = self.file_reader.read_text_from_image(image) if image else "[No image]"
+                        else:
+                            text = self.file_reader.extract_text_from_image(item["path"])
+                    elif item["type"] == "text":
+                        text = item["content"]
+                    else:
+                        text = ""
+                    if text.strip():
+                        all_text.append(text)
+                except Exception as e:
+                    all_text.append(f"[Error processing {item.get('path', 'item')}: {e}]")
+
+            full_prompt = "\n---\n".join(all_text)
+            user_message = {"role": "user", "content": full_prompt}
+            messages_to_send = system_messages + current_history + [user_message]
+
+        self.query(messages_to_send, on_chunk)
