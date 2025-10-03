@@ -64,13 +64,14 @@ class DirectStreamHandler:
         self.original_clipboard: Optional[str] = None
         self.timeout = timeout
         self.on_error = on_error
-        
+        self.stop_event = threading.Event()
+
         # Status tracking
         self.status = StreamStatus.IDLE
         self.error_message: Optional[str] = None
         self.token_count = 0
         self.start_time: Optional[float] = None
-        
+
         # Tuning parameters
         self.buffer_size_limit = 150
         self.paste_delay = 0.1
@@ -169,14 +170,20 @@ class DirectStreamHandler:
         self.stream_token(None)
         self.wait_for_completion()
 
+    def stop(self) -> None:
+        """
+        Immediately stops the streaming by setting the stop event.
+        """
+        self.stop_event.set()
+
     def _consume_tokens(self) -> None:
         """
         Consumer thread that uses clipboard-based paste for reliable text insertion.
         """
         buffer = ""
-        
+
         try:
-            while True:
+            while not self.stop_event.is_set():
                 try:
                     # Get token with timeout
                     token = self.token_queue.get(timeout=1.0)
@@ -191,7 +198,7 @@ class DirectStreamHandler:
 
                     # Decide when to paste
                     should_paste = False
-                    
+
                     if len(buffer) >= self.buffer_size_limit:
                         should_paste = True
                     elif token.endswith((' ', '\n', '\t', '.', ',', '!', '?', ';', ':')):
@@ -213,10 +220,10 @@ class DirectStreamHandler:
             self.status = StreamStatus.ERROR
             self.error_message = f"Consumer thread error: {e}"
             logger.streaming_error("consumer_error", str(e))
-            
+
             if self.on_error:
                 self.on_error("consumer_error", str(e))
-            
+
             # Try to paste any remaining buffer
             if buffer:
                 try:

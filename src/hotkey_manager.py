@@ -61,6 +61,11 @@ class HotkeyManager:
         self.last_query_text = None
         self.last_query_rect = None
 
+        # Track consecutive error counts for progressive help
+        self.consecutive_clipboard_errors = 0
+        self.consecutive_selection_errors = 0
+        self.consecutive_processing_errors = 0
+
     def start(self) -> None:
         """Starts the global hotkey listener."""
         try:
@@ -174,18 +179,34 @@ class HotkeyManager:
                     clipboard_items = clipboard_manager.get_clipboard_items()
                     if not clipboard_items:
                         logger.warning(f"No clipboard items found (attempt {attempt + 1})")
+                        self.consecutive_clipboard_errors += 1
                         if self.system_tray:
-                            self.system_tray.show_message("Blink - Clipboard Error", "Clipboard is empty or contains unsupported content", QSystemTrayIcon.MessageIcon.Warning)
+                            tip = "Try recopying content to clipboard again."
+                            if self.consecutive_clipboard_errors >= 5:
+                                tip += " If this persists, restart the app from the system tray."
+                            self.system_tray.show_message("Blink - Clipboard Error",
+                                                        f"Clipboard is empty or contains unsupported content. {tip}",
+                                                        QSystemTrayIcon.MessageIcon.Warning)
                         attempt += 1
                         continue
 
                     selected_instruction = self.text_capturer.capture_selected_text()
                     if not selected_instruction or not selected_instruction.strip():
                         logger.warning(f"No instruction text selected (attempt {attempt + 1})")
+                        self.consecutive_selection_errors += 1
                         if self.system_tray:
-                            self.system_tray.show_message("Blink - Selection Error", "No instruction text selected", QSystemTrayIcon.MessageIcon.Warning)
+                            tip = "Try reselecting or retyping the text/command again."
+                            if self.consecutive_selection_errors >= 5:
+                                tip += " If this persists, restart the app from the system tray."
+                            self.system_tray.show_message("Blink - Selection Error",
+                                                        f"No instruction text selected. {tip}",
+                                                        QSystemTrayIcon.MessageIcon.Warning)
                         attempt += 1
                         continue
+
+                    # Reset error counters on success
+                    self.consecutive_clipboard_errors = 0
+                    self.consecutive_selection_errors = 0
 
                     success = self._process_adaptive_clipboard_query(
                         clipboard_items, selected_instruction, output_mode
@@ -298,9 +319,15 @@ class HotkeyManager:
                 
             if not success:
                 logger.error("Failed to process text after all retry attempts")
+                self.consecutive_processing_errors += 1
                 # Show system tray notification for the failure
                 if self.system_tray:
-                    self.system_tray.show_message("Blink - Processing Error", "Failed to capture or process selected text after multiple attempts", QSystemTrayIcon.MessageIcon.Warning)
+                    tip = "Try selecting text again and pressing the hotkey."
+                    if self.consecutive_processing_errors >= 5:
+                        tip += " If this persists, restart the app from the system tray."
+                    self.system_tray.show_message("Blink - Processing Error",
+                                                f"Failed to capture or process selected text after multiple attempts. {tip}",
+                                                QSystemTrayIcon.MessageIcon.Warning)
                 # Only show error in popup mode
                 if output_mode == "popup":
                     try:
@@ -314,6 +341,9 @@ class HotkeyManager:
                         )
                     except Exception as e:
                         logger.error(f"Error showing error message: {e}")
+            else:
+                # Reset error counter on success
+                self.consecutive_processing_errors = 0
                 
         except Exception as e:
             logger.error(f"Unexpected error in process: {e}")
@@ -423,37 +453,49 @@ class HotkeyManager:
             logger.streaming_error(error_type, message)
 
         handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
-        handler.start_streaming()
 
-        # Accumulate full response for history
-        full_response = []
-
-        def on_chunk(chunk: str) -> None:
-            handler.stream_token(chunk)
-            full_response.append(chunk)
+        # Register Esc hotkey for emergency stop
+        kb.add_hotkey('esc', lambda: handler.stop(), suppress=True)
 
         try:
-            self.llm_interface.query(messages, on_chunk)
-            handler.stream_token(None)
-            final_status = handler.wait_for_completion()
+            handler.start_streaming()
 
-            if final_status == StreamStatus.COMPLETE:
-                # Add to conversation history if enabled
-                memory_enabled = self.config_manager.get("memory_enabled", True)
-                if memory_enabled:
-                    history_manager = get_conversation_history(self.config_manager)
-                    history_manager.add_message("user", user_text)
-                    history_manager.add_message("assistant", "".join(full_response))
-                return True
-            else:
-                error_msg = handler.get_error_message()
-                logger.error(f"Stream failed with status {final_status.value}: {error_msg}")
+            # Accumulate full response for history
+            full_response = []
+
+            def on_chunk(chunk: str) -> None:
+                handler.stream_token(chunk)
+                full_response.append(chunk)
+
+            try:
+                self.llm_interface.query(messages, on_chunk)
+                handler.stream_token(None)
+                final_status = handler.wait_for_completion()
+
+                if final_status == StreamStatus.COMPLETE:
+                    # Add to conversation history if enabled
+                    memory_enabled = self.config_manager.get("memory_enabled", True)
+                    if memory_enabled:
+                        history_manager = get_conversation_history(self.config_manager)
+                        history_manager.add_message("user", user_text)
+                        history_manager.add_message("assistant", "".join(full_response))
+                    return True
+                else:
+                    error_msg = handler.get_error_message()
+                    logger.error(f"Stream failed with status {final_status.value}: {error_msg}")
+                    return False
+
+            except Exception as e:
+                logger.streaming_error("llm_query_error", str(e))
+                handler.stop_streaming()
                 return False
 
-        except Exception as e:
-            logger.streaming_error("llm_query_error", str(e))
-            handler.stop_streaming()
-            return False
+        finally:
+            # Always unregister the Esc hotkey
+            try:
+                kb.remove_hotkey('esc')
+            except Exception as e:
+                logger.warning(f"Could not unregister Esc hotkey: {e}")
 
     def _process_popup(self, messages: list[dict[str, str]], user_text: str, selection_rect) -> bool:
         """
@@ -562,43 +604,55 @@ class HotkeyManager:
             logger.streaming_error(error_type, message)
 
         handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
-        handler.start_streaming()
 
-        # Accumulate full response for history
-        full_response = []
-
-        def on_chunk(chunk: str) -> None:
-            handler.stream_token(chunk)
-            full_response.append(chunk)
+        # Register Esc hotkey for emergency stop
+        kb.add_hotkey('esc', lambda: handler.stop(), suppress=True)
 
         try:
-            self.llm_interface.query(messages, on_chunk)
-            handler.stream_token(None)
-            final_status = handler.wait_for_completion()
+            handler.start_streaming()
 
-            if final_status == StreamStatus.COMPLETE:
-                # Add to conversation history if enabled
-                memory_enabled = self.config_manager.get("memory_enabled", True)
-                if memory_enabled:
-                    history_manager = get_conversation_history(self.config_manager)
-                    # For multimodal prompts, convert to a text representation for history
-                    if is_multimodal:
-                        user_text = "Multimodal query with image and instruction"
-                    else:
-                        user_text = user_prompt if isinstance(user_prompt, str) else str(user_prompt)
-                    
-                    history_manager.add_message("user", user_text)
-                    history_manager.add_message("assistant", "".join(full_response))
-                return True
-            else:
-                error_msg = handler.get_error_message()
-                logger.error(f"Clipboard context stream failed with status {final_status.value}: {error_msg}")
+            # Accumulate full response for history
+            full_response = []
+
+            def on_chunk(chunk: str) -> None:
+                handler.stream_token(chunk)
+                full_response.append(chunk)
+
+            try:
+                self.llm_interface.query(messages, on_chunk)
+                handler.stream_token(None)
+                final_status = handler.wait_for_completion()
+
+                if final_status == StreamStatus.COMPLETE:
+                    # Add to conversation history if enabled
+                    memory_enabled = self.config_manager.get("memory_enabled", True)
+                    if memory_enabled:
+                        history_manager = get_conversation_history(self.config_manager)
+                        # For multimodal prompts, convert to a text representation for history
+                        if is_multimodal:
+                            user_text = "Multimodal query with image and instruction"
+                        else:
+                            user_text = user_prompt if isinstance(user_prompt, str) else str(user_prompt)
+
+                        history_manager.add_message("user", user_text)
+                        history_manager.add_message("assistant", "".join(full_response))
+                    return True
+                else:
+                    error_msg = handler.get_error_message()
+                    logger.error(f"Clipboard context stream failed with status {final_status.value}: {error_msg}")
+                    return False
+
+            except Exception as e:
+                logger.streaming_error("clipboard_context_llm_query_error", str(e))
+                handler.stop_streaming()
                 return False
 
-        except Exception as e:
-            logger.streaming_error("clipboard_context_llm_query_error", str(e))
-            handler.stop_streaming()
-            return False
+        finally:
+            # Always unregister the Esc hotkey
+            try:
+                kb.remove_hotkey('esc')
+            except Exception as e:
+                logger.warning(f"Could not unregister Esc hotkey: {e}")
 
     def _process_clipboard_popup(self, messages: list[dict[str, str]], user_prompt: Union[str, List[Dict]], is_multimodal: bool) -> bool:
         """
