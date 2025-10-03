@@ -62,6 +62,10 @@ class SystemTrayManager(QObject):
         settings_action.triggered.connect(lambda: self.settings_requested.emit())
         self.menu.addAction(settings_action)
 
+        # Notifications toggle
+        if self.config_manager:
+            self.setup_notifications_toggle()
+
         # Memory submenu
         if self.config_manager:
             self.setup_memory_menu()
@@ -78,6 +82,18 @@ class SystemTrayManager(QObject):
         quit_action = QAction("Quit", self.app)
         quit_action.triggered.connect(lambda: self.quit_requested.emit())
         self.menu.addAction(quit_action)
+
+    def setup_notifications_toggle(self) -> None:
+        """
+        Sets up the notifications toggle menu item.
+        """
+        # Enable/Disable notifications
+        notifications_enabled = self.config_manager.get("enable_notifications", True)
+        notifications_action = QAction("Enable Notifications", self.app)
+        notifications_action.setCheckable(True)
+        notifications_action.setChecked(notifications_enabled)
+        notifications_action.triggered.connect(self.toggle_notifications)
+        self.menu.addAction(notifications_action)
 
     def setup_memory_menu(self) -> None:
         """
@@ -125,6 +141,12 @@ class SystemTrayManager(QObject):
         export_action = QAction("Export Conversation...", self.app)
         export_action.triggered.connect(self.export_history)
         memory_menu.addAction(export_action)
+
+    def toggle_notifications(self) -> None:
+        """Toggles notifications on/off."""
+        if self.config_manager:
+            current = self.config_manager.get("enable_notifications", True)
+            self.config_manager.set("enable_notifications", not current)
 
     def toggle_memory(self) -> None:
         """Toggles memory on/off."""

@@ -10,6 +10,7 @@ import queue
 import time
 import pyperclip
 import pyautogui
+import win32gui
 from typing import Protocol, Optional, Callable
 from enum import Enum
 from .error_logger import logger
@@ -60,11 +61,14 @@ class DirectStreamHandler:
         """
         self.token_queue = queue.Queue()
         self.consumer_thread = None
+        self.focus_monitor_thread = None
         self.is_streaming = False
         self.original_clipboard: Optional[str] = None
         self.timeout = timeout
         self.on_error = on_error
         self.stop_event = threading.Event()
+        self._pause_event = threading.Event()
+        self.target_window_handle = None
 
         # Status tracking
         self.status = StreamStatus.IDLE
@@ -95,6 +99,9 @@ class DirectStreamHandler:
             logger.warning("Streaming already in progress")
             return
 
+        # Capture target window handle
+        self.target_window_handle = win32gui.GetForegroundWindow()
+
         # Save original clipboard content
         try:
             self.original_clipboard = pyperclip.paste()
@@ -108,12 +115,17 @@ class DirectStreamHandler:
         self.token_count = 0
         self.start_time = time.time()
         self.is_streaming = True
-        
+        self._pause_event.set()  # Start in running state
+
         logger.info("Direct stream handler started")
 
         # Start consumer thread
         self.consumer_thread = threading.Thread(target=self._consume_tokens, daemon=False)
         self.consumer_thread.start()
+
+        # Start focus monitor thread
+        self.focus_monitor_thread = threading.Thread(target=self._monitor_focus, daemon=False)
+        self.focus_monitor_thread.start()
 
     def wait_for_completion(self) -> StreamStatus:
         """
@@ -134,13 +146,13 @@ class DirectStreamHandler:
                 self.status = StreamStatus.TIMEOUT
                 self.error_message = f"Stream timeout after {self.timeout}s"
                 logger.streaming_timeout(self.timeout)
-                
+
                 if self.on_error:
                     self.on_error("timeout", self.error_message)
-                
-                # Force stop
+
+                # Force stop all threads
+                self._stop_all_threads()
                 self.is_streaming = False
-                self.consumer_thread.join(timeout=2.0)
             
             elif self.status == StreamStatus.STREAMING:
                 # Completed successfully
@@ -170,11 +182,49 @@ class DirectStreamHandler:
         self.stream_token(None)
         self.wait_for_completion()
 
+    def _stop_all_threads(self) -> None:
+        """
+        Stops all background threads cleanly.
+        """
+        # Set stop event to signal all threads to exit
+        self.stop_event.set()
+
+        # Ensure pause event is set so consumer thread can wake up and exit
+        self._pause_event.set()
+
+        # Wait for threads to finish
+        if self.consumer_thread and self.consumer_thread.is_alive():
+            self.consumer_thread.join(timeout=2.0)
+
+        if self.focus_monitor_thread and self.focus_monitor_thread.is_alive():
+            self.focus_monitor_thread.join(timeout=2.0)
+
     def stop(self) -> None:
         """
         Immediately stops the streaming by setting the stop event.
         """
-        self.stop_event.set()
+        self._stop_all_threads()
+
+    def _monitor_focus(self) -> None:
+        """
+        Monitors the active window focus and pauses/resumes streaming accordingly.
+        """
+        try:
+            while not self.stop_event.is_set():
+                current_handle = win32gui.GetForegroundWindow()
+
+                if current_handle == self.target_window_handle:
+                    # Target window is active, ensure streaming is running
+                    self._pause_event.set()
+                else:
+                    # Different window is active, pause streaming
+                    self._pause_event.clear()
+
+                time.sleep(0.25)  # Check every 250ms
+
+        except Exception as e:
+            logger.error(f"Focus monitor error: {e}")
+            # Don't propagate the error, just log it
 
     def _consume_tokens(self) -> None:
         """
@@ -184,6 +234,9 @@ class DirectStreamHandler:
 
         try:
             while not self.stop_event.is_set():
+                # Wait for pause event - this blocks if streaming is paused
+                self._pause_event.wait()
+
                 try:
                     # Get token with timeout
                     token = self.token_queue.get(timeout=1.0)
