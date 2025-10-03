@@ -21,6 +21,7 @@ class SystemTrayManager(QObject):
 
     settings_requested = pyqtSignal()
     quit_requested = pyqtSignal()
+    restart_requested = pyqtSignal()
 
     def __init__(self, app: QApplication, config_manager=None) -> None:
         """
@@ -67,6 +68,11 @@ class SystemTrayManager(QObject):
 
         # Separator
         self.menu.addSeparator()
+
+        # Restart action
+        restart_action = QAction("Restart", self.app)
+        restart_action.triggered.connect(lambda: self.restart_requested.emit())
+        self.menu.addAction(restart_action)
 
         # Quit action
         quit_action = QAction("Quit", self.app)
@@ -183,6 +189,27 @@ class SystemTrayManager(QObject):
             icon: Message icon type.
         """
         self.tray_icon.showMessage(title, message, icon)
+
+    def show_notification(self, title: str, message: str, icon: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information) -> None:
+        """
+        Shows a notification message from the tray icon, respecting user settings.
+
+        Non-error notifications are only shown if enable_notifications is True.
+        Error notifications are always shown.
+
+        Args:
+            title (str): Message title.
+            message (str): Message content.
+            icon: Message icon type.
+        """
+        # Always show error notifications
+        if icon == QSystemTrayIcon.MessageIcon.Critical or icon == QSystemTrayIcon.MessageIcon.Warning:
+            self.show_message(title, message, icon)
+            return
+
+        # For non-error notifications, check user setting
+        if self.config_manager and self.config_manager.get("enable_notifications", True):
+            self.show_message(title, message, icon)
 
     def hide(self) -> None:
         """

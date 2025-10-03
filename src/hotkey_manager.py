@@ -153,6 +153,10 @@ class HotkeyManager:
         Processes the clipboard context hotkey event with retry logic if enabled.
         """
         try:
+            # Show processing notification
+            if self.system_tray:
+                self.system_tray.show_notification("Blink", "Processing clipboard context...")
+
             # Add a small delay to ensure keys are released
             time.sleep(0.2)
             output_mode = self.config_manager.get("output_mode", "popup")
@@ -170,12 +174,16 @@ class HotkeyManager:
                     clipboard_items = clipboard_manager.get_clipboard_items()
                     if not clipboard_items:
                         logger.warning(f"No clipboard items found (attempt {attempt + 1})")
+                        if self.system_tray:
+                            self.system_tray.show_message("Blink - Clipboard Error", "Clipboard is empty or contains unsupported content", QSystemTrayIcon.MessageIcon.Warning)
                         attempt += 1
                         continue
 
                     selected_instruction = self.text_capturer.capture_selected_text()
                     if not selected_instruction or not selected_instruction.strip():
                         logger.warning(f"No instruction text selected (attempt {attempt + 1})")
+                        if self.system_tray:
+                            self.system_tray.show_message("Blink - Selection Error", "No instruction text selected", QSystemTrayIcon.MessageIcon.Warning)
                         attempt += 1
                         continue
 
@@ -240,6 +248,10 @@ class HotkeyManager:
         Processes the hotkey event with retry logic if enabled.
         """
         try:
+            # Show processing notification
+            if self.system_tray:
+                self.system_tray.show_notification("Blink", "Processing query...")
+
             # Add a small delay to ensure keys are released
             time.sleep(0.2)
             
@@ -286,6 +298,9 @@ class HotkeyManager:
                 
             if not success:
                 logger.error("Failed to process text after all retry attempts")
+                # Show system tray notification for the failure
+                if self.system_tray:
+                    self.system_tray.show_message("Blink - Processing Error", "Failed to capture or process selected text after multiple attempts", QSystemTrayIcon.MessageIcon.Warning)
                 # Only show error in popup mode
                 if output_mode == "popup":
                     try:

@@ -73,7 +73,9 @@ class ConfigManager:
                 "gpt-4o": True,
                 "claude-3": True,
                 "llava": True
-            }
+            },
+            # Notification settings
+            "enable_notifications": True
         }
         
         changed = False

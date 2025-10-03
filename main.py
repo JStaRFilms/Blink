@@ -46,8 +46,23 @@ def main() -> None:
     def quit_app():
         app.quit()
 
+    def restart_application():
+        """Restarts the application by saving history and relaunching."""
+        try:
+            # Save history before restart
+            history_manager = get_conversation_history(config_manager)
+            history_manager.save_history()
+
+            # Relaunch the executable and quit current instance
+            import sys, os
+            os.startfile(sys.executable)  # Re-launches the .exe
+            app.quit()  # Closes the current instance
+        except Exception as e:
+            print(f"Error during restart: {e}")
+
     system_tray.settings_requested.connect(show_settings)
     system_tray.quit_requested.connect(quit_app)
+    system_tray.restart_requested.connect(restart_application)
 
     # Initialize hotkey manager with system tray reference
     hotkey_manager = HotkeyManager(text_capturer, llm_interface, overlay_ui, config_manager, system_tray)
