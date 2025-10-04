@@ -37,6 +37,9 @@ ENV/
 config.json  # Excluding config file as it may contain sensitive information
 *.log
 
+# Media/Assets
+*.mp4
+
 # Local development settings
 local_settings.py
 .env

@@ -1,6 +1,6 @@
 
 <div align="center">
-<img src="assets/icon.png" alt="Blink Logo" width="150"/>
+<img src="https://github.com/JStaRFilms/Blink/blob/main/assets/icon.png?raw=true" alt="Blink Logo" width="150"/>
   <h1>Blink: Your Instant AI Sidekick</h1>
   <p><strong>Select text. Hit a hotkey. Get AI magic. Instantly. Anywhere.</strong></p>
   
@@ -17,11 +17,13 @@
 ---
 
 <div align="center">
+  <p><strong>✨ Pop-up Mode: Clean, controlled, and perfect for complex tasks.</strong></p>
+  <img src="https://github.com/JStaRFilms/Blink/blob/main/assets/demo%201.gif?raw=true" alt="Blink Pop-up Mode Demo">
 
-**[ YOUR AMAZING GIF DEMO GOES HERE ]**
+  <br>
 
-*(Just drag and drop your `demo.gif` into a GitHub issue or comment to get a link, then paste it here like this: `![Blink Demo](link-to-your.gif)`)*
-
+  <p><strong>🚀 Direct Stream Mode: Seamlessly injects AI responses right where you're working.</strong></p>
+  <img src="https://github.com/JStaRFilms/Blink/blob/main/assets/demo%202.gif?raw=true" alt="Blink Direct Stream Mode Demo">
 </div>
 
 ---
