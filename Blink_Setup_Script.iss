@@ -4,7 +4,7 @@
 [Setup]
 ; --- CORE APP INFO ---
 AppName=Blink AI Assistant
-AppVersion=1.0.0
+AppVersion=1.0.3
 AppPublisher=JStaRFilms
 AppPublisherURL=https://github.com/JStaRFilms/Blink
 DefaultDirName={autopf}\Blink
@@ -20,8 +20,8 @@ WizardSmallImageFile=assets\wizard_icon.bmp
 WizardStyle=modern
 
 ; --- OUTPUT ---
-OutputDir=userdocs:Blink Installer
-OutputBaseFilename=Blink-Setup-v1.0.0
+OutputDir=dist
+OutputBaseFilename=Blink-Setup-v1.0.3
 Compression=lzma
 SolidCompression=yes
 
@@ -36,6 +36,7 @@ Name: "launchonstartup"; Description: "Launch Blink when Windows starts"; GroupD
 [Files]
 ; --- This is your main payload ---
 Source: "dist\Blink.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LICENSE"; DestDir: "{app}"; Flags: isreadme
 ; Add any other necessary files here if you weren't using --onefile
 
 [Icons]
@@ -48,75 +49,39 @@ Name: "{autodesktop}\Blink AI Assistant"; Filename: "{app}\Blink.exe"; Tasks: de
 Filename: "{app}\Blink.exe"; Description: "{cm:LaunchProgram,Blink AI Assistant}"; Flags: nowait postinstall skipifsilent
 
 ; ===================================================================================
-;  -- THE MAGIC SECTION (Pascal Scripting) --
-;  This handles Tesseract and the custom first-run setup.
+;  -- REGISTRY ENTRIES --
+;  Set the first-run flag so the app knows to show the wizard
+; ===================================================================================
+[Registry]
+Root: HKCU; Subkey: "Software\Blink"; ValueType: dword; ValueName: "FirstRun"; ValueData: "1"; Flags: uninsdeletekey
+
+; ===================================================================================
+;  -- SIMPLE SCRIPT SECTION --
+;  Just sets up basic config and first-run flag.
 ; ===================================================================================
 [Code]
-var
-  ModelsPage: TInputOptionWizardPage;
-  TesseractInstalled: Boolean;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ConfigPath, ConfigJson: String;
+  ConfigPath: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    Log('Post-install step: Writing initial config...');
+    Log('Post-install step: Writing basic config...');
 
-    // Create the initial config.json in the user's AppData folder with default Ollama
+    // Create the initial config.json in the user's AppData folder
     ConfigPath := ExpandConstant('{userappdata}\Blink');
     CreateDir(ConfigPath);
 
-    // Super simple default config
-    ConfigJson := '{' +
-                  ' "selected_model": "ollama:default",' +
-                  ' "output_mode": "popup",' +
-                  ' "memory_enabled": true,' +
-                  ' "system_prompt": "You are a helpful and concise AI assistant."' +
-                  '}';
+    // Write minimal default config - the first-run wizard will handle the rest
+    SaveStringToFile(ConfigPath + '\config.json',
+      '{' + #13#10 +
+      '  "selected_model": "ollama:llama3.2:latest",' + #13#10 +
+      '  "output_mode": "popup",' + #13#10 +
+      '  "memory_enabled": true,' + #13#10 +
+      '  "system_prompt": "You are a helpful and concise AI assistant."' + #13#10 +
+      '}', False);
 
-    SaveStringToFile(ConfigPath + '\config.json', ConfigJson, False);
-    Log('Initial config.json created with default Ollama provider');
+    Log('Basic config saved. First-run wizard will handle detailed setup.');
   end;
-end;
-
-function InitializeSetup(): Boolean;
-begin
-  // Check if Tesseract is already installed before we try to download it
-  TesseractInstalled := RegKeyExists(HKLM, 'Software\Tesseract-OCR') or RegKeyExists(HKCU, 'Software\Tesseract-OCR');
-  if TesseractInstalled then
-    Log('Tesseract is already installed. Skipping download.')
-  else
-    Log('Tesseract not found. Will be installed.');
-  Result := True;
-end;
-
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  // Custom page commented out for now - can be added later
-end;
-
-procedure InitializeWizard();
-begin
-  // Custom page commented out for now - can be added later
-
-  // --- Handle Tesseract Installation ---
-  // Commented out for now - requires InnoCallback.dll
-  // if not TesseractInstalled then
-  // begin
-  //   // This is the "silent install" step. Inno Setup will download and run this for the user.
-  //   // NOTE: This URL points to a specific version. Check for the latest stable version.
-  //   AddPerlIcoDll; // Required for downloading
-  //   Download(
-  //     wpReady,
-  //     'https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-v5.3.3.20231005.exe',
-  //     'tesseract-setup.exe',
-  //     'Installing Tesseract OCR...',
-  //     'Tesseract is a free OCR engine that allows Blink to read text from images for text-only AI models.',
-  //     @InstallTesseract,
-  //     False,
-  //     True
-  //   );
-  // end;
 end;

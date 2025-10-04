@@ -14,6 +14,7 @@ from src.config_manager import ConfigManager
 from src.system_tray import SystemTrayManager
 from src.settings_dialog import SettingsDialog
 from src.history_manager import get_conversation_history
+from src.first_run_wizard import run_first_run_wizard
 
 # Import modules that PyInstaller might miss
 try:
@@ -65,6 +66,11 @@ def main() -> None:
 
     # Initialize config manager
     config_manager = ConfigManager()
+
+    # Run first-run wizard if needed
+    if not run_first_run_wizard(config_manager):
+        print("First-run setup cancelled. Exiting.")
+        return
 
     # Initialize components
     text_capturer = TextCapturer()
