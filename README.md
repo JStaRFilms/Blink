@@ -24,6 +24,11 @@
 
   <p><strong>🚀 Direct Stream Mode: Seamlessly injects AI responses right where you're working.</strong></p>
   <img src="https://github.com/JStaRFilms/Blink/blob/main/assets/demo%202.gif?raw=true" alt="Blink Direct Stream Mode Demo">
+
+  <br>
+
+  <p><strong>📧 Real-World Example: Drafting Emails in Gmail with Direct Stream.</strong></p>
+  <img src="https://github.com/JStaRFilms/Blink/blob/main/assets/demo%203.gif?raw=true" alt="Blink Direct Stream in Gmail Demo">
 </div>
 
 ---
