@@ -15,11 +15,51 @@ from src.system_tray import SystemTrayManager
 from src.settings_dialog import SettingsDialog
 from src.history_manager import get_conversation_history
 
+# Import modules that PyInstaller might miss
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+# Ensure pywin32 modules are bundled and available at runtime
+try:
+    import pywintypes
+    import pythoncom
+    import win32clipboard
+    import win32gui
+    import win32api
+    import win32con
+except ImportError:
+    pass  # Will fail later if truly missing
+
 
 def main() -> None:
     """
     Main function to start the Blink application.
     """
+    # Check for existing instance
+    import os
+    lock_file = os.path.join(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.getcwd(), 'blink.lock')
+
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, 'r') as f:
+                pid = int(f.read().strip())
+            # Check if process is still running
+            import psutil
+            if psutil.pid_exists(pid):
+                print("Another instance of Blink is already running.")
+                return
+        except (ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+            pass  # Lock file is stale, continue
+
+    # Create lock file with current PID
+    try:
+        with open(lock_file, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass  # Ignore if we can't create lock file
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Keep app running even when windows close
 
@@ -44,6 +84,7 @@ def main() -> None:
         settings_dialog.exec()
 
     def quit_app():
+        print("Quit requested")
         app.quit()
 
     def restart_application():
@@ -70,13 +111,20 @@ def main() -> None:
     # Start the hotkey listener
     hotkey_manager.start()
 
-    # Connect application shutdown to save history
+    # Connect application shutdown to save history and cleanup
     def save_history_on_quit():
         try:
             history_manager = get_conversation_history(config_manager)
             history_manager.save_history()
         except Exception as e:
             print(f"Warning: Could not save history on shutdown: {e}")
+
+        # Clean up lock file
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
 
     app.aboutToQuit.connect(save_history_on_quit)
 

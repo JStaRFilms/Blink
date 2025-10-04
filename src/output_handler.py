@@ -5,6 +5,15 @@ Provides different methods for outputting AI responses, including direct text st
 with comprehensive error handling and status tracking.
 """
 
+import sys
+if getattr(sys, 'frozen', False):
+    # Ensure pywin32 core modules are available in frozen app
+    try:
+        import pywintypes
+        import pythoncom
+    except ImportError:
+        pass
+
 import threading
 import queue
 import time

@@ -97,12 +97,17 @@ Wanna get your hands dirty or see how the AI did it?
     ```
 
 #### Building the `.exe` Yourself
-If you want to build the single-file executable, here's the magic command. Make sure you have your `assets/icon.ico` file ready.
+If you want to build the single-file executable, use the `.spec` file which handles all the complex pywin32 bundling and includes the icon/assets automatically.
 
 ```bash
-pyinstaller --name Blink --onefile --windowed --icon="assets/icon.ico" --add-data="assets;assets" main.py
+# ⚠️ ALWAYS build with: pyinstaller Blink.spec
+# Do NOT use: pyinstaller main.py — it ignores all pywin32 bundling logic!
+pyinstaller Blink.spec
 ```
-The final `Blink.exe` will be in the `dist` folder.
+
+**Why `.spec` file?** The old CLI approach (`pyinstaller --name Blink --onefile --windowed --icon="assets/icon.ico" --add-data="assets;assets" main.py`) doesn't handle the complex pywin32 dependencies properly. The `.spec` file includes automatic collection of all required DLLs and data files.
+
+The final `Blink.exe` will be in the `dist` folder with the icon and all assets bundled correctly.
 
 ## 🤝 Let's Build Together! (Contribute)
 

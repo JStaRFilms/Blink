@@ -6,9 +6,16 @@ Handles detecting and extracting different types of clipboard content including 
 
 import enum
 from typing import Optional, List, Dict
-import win32clipboard
 import pyperclip
 import time
+
+# Force import order for PyInstaller compatibility
+try:
+    import pywintypes  # Must be imported before win32clipboard
+    import pythoncom  # Also often needed
+    import win32clipboard
+except ImportError:
+    win32clipboard = None
 
 
 class ClipboardContentType(enum.Enum):
