@@ -688,46 +688,95 @@ class HotkeyManager:
             return False
 
     def _process_adaptive_clipboard_query(self, clipboard_items, user_query, output_mode):
-        """Delegates to LLMInterface's adaptive query."""
+        """Delegates to LLMInterface's adaptive query router with support for both popup and direct stream modes."""
         timeout = self.config_manager.get("streaming_timeout", 120)
         full_response = []
         received_data = False
 
-        def on_chunk(chunk: str):
-            nonlocal received_data
-            received_data = True
-            full_response.append(chunk)
-            if output_mode == "popup":
+        # Setup common variables
+        memory_enabled = self.config_manager.get("memory_enabled", True)
+        if memory_enabled:
+            from .history_manager import get_conversation_history
+            history = get_conversation_history(self.config_manager)
+
+        if output_mode == "direct_stream":
+            # Direct stream mode setup
+            def on_error(error_type: str, message: str) -> None:
+                logger.streaming_error(error_type, message)
+
+            handler = DirectStreamHandler(timeout=timeout, on_error=on_error)
+
+            # Register Esc hotkey for emergency stop
+            kb.add_hotkey('esc', lambda: handler.stop(), suppress=True)
+
+            try:
+                handler.start_streaming()
+
+                def on_chunk(chunk: str):
+                    nonlocal received_data
+                    received_data = True
+                    handler.stream_token(chunk)
+                    full_response.append(chunk)
+
+                self.llm_interface.query_with_context(clipboard_items, user_query, on_chunk)
+
+                handler.stream_token(None)
+                final_status = handler.wait_for_completion()
+
+                if final_status == StreamStatus.COMPLETE:
+                    # Save to history
+                    if memory_enabled:
+                        user_repr = f"Query: {user_query[:50]}... with {len(clipboard_items)} items"
+                        history.add_message("user", user_repr)
+                        history.add_message("assistant", "".join(full_response))
+                    return True
+                else:
+                    error_msg = handler.get_error_message()
+                    logger.error(f"Clipboard context direct stream failed: {error_msg}")
+                    return False
+
+            except Exception as e:
+                logger.streaming_error("clipboard_context_llm_query_error", str(e))
+                handler.stop_streaming()
+                return False
+
+            finally:
+                # Always unregister the Esc hotkey
+                try:
+                    kb.remove_hotkey('esc')
+                except Exception as e:
+                    logger.warning(f"Could not unregister Esc hotkey: {e}")
+
+        else:
+            # Popup mode (existing logic)
+            def on_chunk(chunk: str):
+                nonlocal received_data
+                received_data = True
+                full_response.append(chunk)
                 self.overlay_ui.append_signal.emit(chunk)
 
-        try:
-            if output_mode == "popup":
+            try:
                 self.overlay_ui.reset_signal.emit()
                 self.overlay_ui.show_signal.emit()
 
-            self.llm_interface.query_with_context(clipboard_items, user_query, on_chunk)
+                self.llm_interface.query_with_context(clipboard_items, user_query, on_chunk)
 
-            if not received_data:
-                if output_mode == "popup":
+                if not received_data:
                     self.overlay_ui.append_signal.emit("\n❌ No response from LLM.")
-                return False
+                    return False
 
-            # Save to history
-            if self.config_manager.get("memory_enabled", True):
-                from .history_manager import get_conversation_history
-                history = get_conversation_history(self.config_manager)
-                # Simplified user representation
-                user_repr = f"Query: {user_query[:50]}... with {len(clipboard_items)} items"
-                history.add_message("user", user_repr)
-                history.add_message("assistant", "".join(full_response))
+                # Save to history
+                if memory_enabled:
+                    user_repr = f"Query: {user_query[:50]}... with {len(clipboard_items)} items"
+                    history.add_message("user", user_repr)
+                    history.add_message("assistant", "".join(full_response))
 
-            return True
+                return True
 
-        except Exception as e:
-            logger.error(f"Adaptive query failed: {e}")
-            if output_mode == "popup":
+            except Exception as e:
+                logger.error(f"Adaptive query failed: {e}")
                 self.overlay_ui.append_signal.emit(f"\n❌ Error: {e}")
-            return False
+                return False
 
     def retry_last_query(self) -> None:
         """
