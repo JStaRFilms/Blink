@@ -130,6 +130,10 @@ class HotkeyManager:
         Processes the clipboard context hotkey event with retry logic if enabled.
         """
         try:
+            # Reset error counters at start of operation
+            self.consecutive_clipboard_errors = 0
+            self.consecutive_selection_errors = 0
+
             # Show processing notification
             if self.system_tray:
                 self.system_tray.show_notification("Blink", "Processing clipboard context...")
@@ -141,57 +145,68 @@ class HotkeyManager:
             max_retries = self.config_manager.get("max_retries", 2)
             attempt = 0
             success = False
+            last_error_type = None
+            last_error_message = None
 
             while attempt <= max_retries and not success:
                 if attempt > 0:
                     logger.info(f"Clipboard context retry attempt {attempt} of {max_retries}")
+                    # Optional retry notification
+                    if self.config_manager.get("show_retry_notifications", False) and self.system_tray:
+                        self.system_tray.show_notification("Blink", f"Retrying clipboard context (attempt {attempt}/{max_retries})...")
                     time.sleep(0.3)
+
                 try:
                     clipboard_manager = ClipboardManager()
                     clipboard_items = clipboard_manager.get_clipboard_items()
                     if not clipboard_items:
                         logger.warning(f"No clipboard items found (attempt {attempt + 1})")
-                        self.consecutive_clipboard_errors += 1
-                        if self.system_tray:
-                            tip = "Try recopying content to clipboard again."
-                            if self.consecutive_clipboard_errors >= 5:
-                                tip += " If this persists, restart the app from the system tray."
-                            self.system_tray.show_message("Blink - Clipboard Error",
-                                                        f"Clipboard is empty or contains unsupported content. {tip}",
-                                                        QSystemTrayIcon.MessageIcon.Warning)
+                        last_error_type = "clipboard_empty"
+                        last_error_message = "Clipboard is empty or contains unsupported content. Supported: text, images (PNG/JPG/JPEG/BMP/GIF), and document files."
                         attempt += 1
                         continue
 
                     selected_instruction = self.text_capturer.capture_selected_text()
                     if not selected_instruction or not selected_instruction.strip():
                         logger.warning(f"No instruction text selected (attempt {attempt + 1})")
-                        self.consecutive_selection_errors += 1
-                        if self.system_tray:
-                            tip = "Try reselecting or retyping the text/command again."
-                            if self.consecutive_selection_errors >= 5:
-                                tip += " If this persists, restart the app from the system tray."
-                            self.system_tray.show_message("Blink - Selection Error",
-                                                        f"No instruction text selected. {tip}",
-                                                        QSystemTrayIcon.MessageIcon.Warning)
+                        last_error_type = "selection_empty"
+                        last_error_message = "No instruction text selected"
                         attempt += 1
                         continue
-
-                    # Reset error counters on success
-                    self.consecutive_clipboard_errors = 0
-                    self.consecutive_selection_errors = 0
 
                     success = self._process_adaptive_clipboard_query(
                         clipboard_items, selected_instruction, output_mode
                     )
                     if not success and enable_retry:
                         logger.info("Will retry clipboard context query")
+                        last_error_type = "processing_failed"
+                        last_error_message = "Processing failed"
                 except Exception as e:
                     logger.error(f"Error in clipboard context (attempt {attempt + 1}): {e}")
                     success = False
+                    last_error_type = "unexpected_error"
+                    last_error_message = str(e)
                 attempt += 1
 
-            if not success:
+            # Show final outcome notification
+            if success:
+                if self.system_tray and self.config_manager.get("show_success_notifications", False):
+                    self.system_tray.show_notification("Blink", "Clipboard context processed successfully")
+            else:
                 logger.error("Failed after all retries")
+                # Increment consecutive error counters only on complete failure
+                if last_error_type == "clipboard_empty":
+                    self.consecutive_clipboard_errors += 1
+                elif last_error_type == "selection_empty":
+                    self.consecutive_selection_errors += 1
+
+                # Show final error notification with help tips
+                if self.system_tray:
+                    tip = self._get_error_help_tip(last_error_type)
+                    self.system_tray.show_message("Blink - Clipboard Context Failed",
+                                                f"{last_error_message}. {tip}",
+                                                QSystemTrayIcon.MessageIcon.Warning)
+
                 if output_mode == "popup":
                     self.overlay_ui.reset_signal.emit()
                     self.overlay_ui.show_signal.emit()
@@ -239,65 +254,85 @@ class HotkeyManager:
         Processes the hotkey event with retry logic if enabled.
         """
         try:
+            # Reset error counters at start of operation
+            self.consecutive_processing_errors = 0
+
             # Show processing notification
             if self.system_tray:
                 self.system_tray.show_notification("Blink", "Processing query...")
 
             # Add a small delay to ensure keys are released
             time.sleep(0.2)
-            
+
             # Get config
             output_mode = self.config_manager.get("output_mode", "popup")
             enable_retry = self.config_manager.get("enable_retry", True)
             max_retries = self.config_manager.get("max_retries", 2)
-            
+
             attempt = 0
             success = False
-            
+            last_error_type = None
+            last_error_message = None
+
             while attempt <= max_retries and not success:
                 if attempt > 0:
                     logger.info(f"Retry attempt {attempt} of {max_retries}")
+                    # Optional retry notification
+                    if self.config_manager.get("show_retry_notifications", False) and self.system_tray:
+                        self.system_tray.show_notification("Blink", f"Retrying query (attempt {attempt}/{max_retries})...")
                     time.sleep(0.3)
-                
+
                 try:
                     # Capture text
                     logger.debug("Attempting to capture selected text...")
                     text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
-                    
+
                     if not text or not text.strip():
-                        logger.warning(f"No text selected (attempt {attempt + 1}/{max_retries + 1})")
+                        logger.warning(f"No text selected (attempt {attempt + 1})")
+                        last_error_type = "text_not_selected"
+                        last_error_message = "No text was selected"
                         attempt += 1
                         continue
-                        
+
                     logger.debug(f"Captured text: {text[:50]}..." if len(text) > 50 else f"Captured text: {text}")
-                    
+
                     # Store for potential retry
                     self.last_query_text = text
                     self.last_query_rect = selection_rect
-                    
+
                     # Process the query
                     success = self._process_query(text, selection_rect, output_mode, attempt)
-                    
+
                     if not success and enable_retry:
                         logger.info(f"Query processing failed, will retry if attempts remain")
-                    
+                        last_error_type = "processing_failed"
+                        last_error_message = "Processing failed"
+
                 except Exception as e:
                     logger.error(f"Error during text capture (attempt {attempt + 1}): {e}")
                     success = False
-                
+                    last_error_type = "capture_error"
+                    last_error_message = f"Text capture failed: {str(e)}"
+
                 attempt += 1
-                
-            if not success:
+
+            # Show final outcome notification
+            if success:
+                if self.system_tray and self.config_manager.get("show_success_notifications", False):
+                    self.system_tray.show_notification("Blink", "Query processed successfully")
+            else:
                 logger.error("Failed to process text after all retry attempts")
-                self.consecutive_processing_errors += 1
-                # Show system tray notification for the failure
+                # Increment consecutive error counters only on complete failure
+                if last_error_type in ["text_not_selected", "capture_error"]:
+                    self.consecutive_processing_errors += 1
+
+                # Show final error notification with help tips
                 if self.system_tray:
-                    tip = "Try selecting text again and pressing the hotkey."
-                    if self.consecutive_processing_errors >= 5:
-                        tip += " If this persists, restart the app from the system tray."
-                    self.system_tray.show_message("Blink - Processing Error",
-                                                f"Failed to capture or process selected text after multiple attempts. {tip}",
+                    tip = self._get_error_help_tip(last_error_type)
+                    self.system_tray.show_message("Blink - Query Failed",
+                                                f"{last_error_message}. {tip}",
                                                 QSystemTrayIcon.MessageIcon.Warning)
+
                 # Only show error in popup mode
                 if output_mode == "popup":
                     try:
@@ -311,10 +346,7 @@ class HotkeyManager:
                         )
                     except Exception as e:
                         logger.error(f"Error showing error message: {e}")
-            else:
-                # Reset error counter on success
-                self.consecutive_processing_errors = 0
-                
+
         except Exception as e:
             logger.error(f"Unexpected error in process: {e}")
 
@@ -777,6 +809,39 @@ class HotkeyManager:
                 logger.error(f"Adaptive query failed: {e}")
                 self.overlay_ui.append_signal.emit(f"\n❌ Error: {e}")
                 return False
+
+    def _get_error_help_tip(self, error_type: str) -> str:
+        """
+        Returns appropriate help tip based on error type and consecutive error count.
+
+        Args:
+            error_type: The type of error that occurred
+
+        Returns:
+            str: Help tip with specific advice
+        """
+        base_tips = {
+            "clipboard_empty": "Try recopying content to clipboard again.",
+            "selection_empty": "Try reselecting or retyping the text/command again.",
+            "text_not_selected": "Try selecting text again and pressing the hotkey.",
+            "capture_error": "Try selecting text again and pressing the hotkey.",
+            "processing_failed": "Try selecting text again and pressing the hotkey.",
+            "unexpected_error": "Check the console for more details."
+        }
+
+        tip = base_tips.get(error_type, "Try again or check the console for details.")
+
+        # Add restart suggestion for persistent issues
+        consecutive_count = 0
+        if error_type == "clipboard_empty":
+            consecutive_count = self.consecutive_clipboard_errors
+        elif error_type in ["selection_empty", "text_not_selected", "capture_error"]:
+            consecutive_count = self.consecutive_processing_errors
+
+        if consecutive_count >= 5:
+            tip += " If this persists, restart the app from the system tray."
+
+        return tip
 
     def retry_last_query(self) -> None:
         """

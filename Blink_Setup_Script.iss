@@ -78,8 +78,7 @@ begin
       '{' + #13#10 +
       '  "selected_model": "ollama:llama3.2:latest",' + #13#10 +
       '  "output_mode": "popup",' + #13#10 +
-      '  "memory_enabled": true,' + #13#10 +
-      '  "system_prompt": "You are a helpful and concise AI assistant."' + #13#10 +
+      '  "memory_enabled": true' + #13#10 +
       '}', False);
 
     Log('Basic config saved. First-run wizard will handle detailed setup.');

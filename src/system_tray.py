@@ -92,7 +92,7 @@ class SystemTrayManager(QObject):
         notifications_action = QAction("Enable Notifications", self.app)
         notifications_action.setCheckable(True)
         notifications_action.setChecked(notifications_enabled)
-        notifications_action.triggered.connect(self.toggle_notifications)
+        notifications_action.triggered.connect(lambda: self.toggle_notifications(notifications_action))
         self.menu.addAction(notifications_action)
 
     def setup_memory_menu(self) -> None:
@@ -107,7 +107,7 @@ class SystemTrayManager(QObject):
         enable_action = QAction("Enable Memory", self.app)
         enable_action.setCheckable(True)
         enable_action.setChecked(memory_enabled)
-        enable_action.triggered.connect(self.toggle_memory)
+        enable_action.triggered.connect(lambda: self.toggle_memory(enable_action))
         memory_menu.addAction(enable_action)
 
         memory_menu.addSeparator()
@@ -142,17 +142,17 @@ class SystemTrayManager(QObject):
         export_action.triggered.connect(self.export_history)
         memory_menu.addAction(export_action)
 
-    def toggle_notifications(self) -> None:
+    def toggle_notifications(self, action: QAction) -> None:
         """Toggles notifications on/off."""
         if self.config_manager:
-            current = self.config_manager.get("enable_notifications", True)
-            self.config_manager.set("enable_notifications", not current)
+            is_checked = action.isChecked()
+            self.config_manager.set("enable_notifications", is_checked)
 
-    def toggle_memory(self) -> None:
+    def toggle_memory(self, action: QAction) -> None:
         """Toggles memory on/off."""
         if self.config_manager:
-            current = self.config_manager.get("memory_enabled", True)
-            self.config_manager.set("memory_enabled", not current)
+            is_checked = action.isChecked()
+            self.config_manager.set("memory_enabled", is_checked)
 
     def update_max_messages(self, value: int) -> None:
         """Updates the maximum number of messages."""

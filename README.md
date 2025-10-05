@@ -1,4 +1,3 @@
-
 <div align="center">
 <img src="https://github.com/JStaRFilms/Blink/blob/main/assets/icon.png?raw=true" alt="Blink Logo" width="150"/>
   <h1>Blink: Your Instant AI Sidekick</h1>
@@ -65,6 +64,8 @@ No need to be a dev. Just grab the installer and you're good to go.
 
 Done. Seriously, that's it.
 
+**Note:** Check the [Releases](https://github.com/JStaRFilms/Blink/releases) tab to download the latest installer for new releases and updates.
+
 ## 💻 How to Use
 
 #### The Main Move: `Ctrl + Alt + .`
@@ -115,6 +116,31 @@ pyinstaller Blink.spec
 **Why `.spec` file?** The old CLI approach (`pyinstaller --name Blink --onefile --windowed --icon="assets/icon.ico" --add-data="assets;assets" main.py`) doesn't handle the complex pywin32 dependencies properly. The `.spec` file includes automatic collection of all required DLLs and data files.
 
 The final `Blink.exe` will be in the `dist` folder with the icon and all assets bundled correctly.
+
+#### Building the Installer Yourself
+Once you have the `Blink.exe`, you can build the professional installer using Inno Setup:
+
+1. **Install Inno Setup** (if not already installed):
+   - Download from: https://jrsoftware.org/isinfo.php
+   - Install it on your system
+
+2. **Convert PNG assets to BMP** (required by Inno Setup):
+   ```bash
+   python convert_assets.py
+   ```
+   This converts `installer_banner.png` and `wizard_icon.png` to BMP format.
+
+3. **Build the installer**:
+   ```bash
+   # Make sure ISCC.exe is in your PATH, or use full path
+   # In PowerShell, use: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" Blink_Setup_Script.iss
+   # In CMD, use:
+   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" Blink_Setup_Script.iss
+   ```
+
+The final installer `Blink-Setup-v1.0.3.exe` will be created in the `dist` folder.
+
+**Build Order:** Always build the `.exe` first, then the installer. The installer script references the `Blink.exe` from the `dist` folder.
 
 ## 🤝 Let's Build Together! (Contribute)
 

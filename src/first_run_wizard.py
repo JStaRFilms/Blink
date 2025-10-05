@@ -687,7 +687,6 @@ class FirstRunWizard(QWizard):
         # Save other defaults
         self.config_manager.set("output_mode", "popup")
         self.config_manager.set("memory_enabled", True)
-        self.config_manager.set("system_prompt", "You are a helpful and concise AI assistant.")
 
         # Clear first-run flag
         try:
