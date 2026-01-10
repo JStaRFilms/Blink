@@ -21,8 +21,7 @@ class TextCapturer:
         Initializes the TextCapturer.
         """
         # Initialize keyboard controller for fallback method
-        from pynput.keyboard import Controller
-        self.keyboard = Controller()
+        pass
 
     def capture_selected_text(self) -> str:
         """
@@ -115,16 +114,17 @@ class TextCapturer:
         """
         # Import here to avoid circular import issues
         import pyperclip
-        from pynput.keyboard import Key
+        import keyboard
         import time
 
         # Save original clipboard content
         original_clipboard = pyperclip.paste()
 
-        # Simulate Ctrl+C
-        with self.keyboard.pressed(Key.ctrl):
-            self.keyboard.press('c')
-            self.keyboard.release('c')
+        # Release modifiers to prevent interference (e.g. Alt from hotkey)
+        keyboard.release('alt')
+        
+        # Simulate Ctrl+C using keyboard module which is more robust here
+        keyboard.send('ctrl+c')
 
         # Small delay to allow the copy operation to complete
         time.sleep(0.1)

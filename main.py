@@ -103,6 +103,12 @@ def main() -> None:
             # Relaunch the executable and quit current instance
             import sys, os
             os.startfile(sys.executable)  # Re-launches the .exe
+            import subprocess
+            if getattr(sys, "frozen", False):
+                os.startfile(sys.executable) # Re-Launch the .exe
+            else:
+                # Re-launch script if running from the source code
+                subprocess.Popen([sys.executable , sys.argv[0]])
             app.quit()  # Closes the current instance
         except Exception as e:
             print(f"Error during restart: {e}")

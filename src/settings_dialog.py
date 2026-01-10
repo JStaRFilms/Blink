@@ -127,6 +127,7 @@ class SettingsDialog(QDialog):
         openai_layout.addWidget(QLabel("OpenAI API Key:"))
         self.openai_key_edit = QLineEdit()
         self.openai_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_key_edit.editingFinished.connect(self.update_models_list)
         openai_layout.addWidget(self.openai_key_edit)
         api_layout.addLayout(openai_layout)
 
@@ -135,6 +136,7 @@ class SettingsDialog(QDialog):
         gemini_layout.addWidget(QLabel("Gemini API Key:"))
         self.gemini_key_edit = QLineEdit()
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_key_edit.editingFinished.connect(self.update_models_list)
         gemini_layout.addWidget(self.gemini_key_edit)
         api_layout.addLayout(gemini_layout)
 
@@ -208,6 +210,10 @@ class SettingsDialog(QDialog):
         index = self.model_combo.findText(selected_model)
         if index >= 0:
             self.model_combo.setCurrentIndex(index)
+        else:
+            # Add saved model temporarily if not in cache to prevent overwrite
+            self.model_combo.addItem(selected_model)
+            self.model_combo.setCurrentIndex(self.model_combo.count() - 1)
 
         # Load output mode
         output_mode = self.config_manager.get("output_mode", "popup")
@@ -318,6 +324,10 @@ class SettingsDialog(QDialog):
         Starts background fetching of models using a separate thread.
         """
         try:
+            # Check if thread is already running
+            if hasattr(self, 'model_thread') and self.model_thread.isRunning():
+                return
+                
             from .llm_interface import ModelFetcher
 
             # Create the fetcher and thread
@@ -384,3 +394,30 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Startup manager not available. Please ensure pywin32 is installed.")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to update startup setting: {e}")
+
+    def update_models_list(self) -> None:
+        """
+        Updates the LLM interface with current keys and triggers a model refresh.
+        Called when the user finishes editing an API key field.
+        """
+        # Temporarily update LLM interface with keys from UI so fetcher works
+        openai_key = self.openai_key_edit.text().strip()
+        if openai_key:
+            try:
+                from openai import OpenAI
+                self.llm_interface.openai_client = OpenAI(api_key=openai_key)
+            except ImportError:
+                pass
+        
+        gemini_key = self.gemini_key_edit.text().strip()
+        if gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                self.llm_interface.gemini_available = True
+            except ImportError:
+                self.llm_interface.gemini_available = False
+
+        # Force refresh of cache and start background fetch
+        self.llm_interface.refresh_models_cache()
+        self.start_background_model_fetch()

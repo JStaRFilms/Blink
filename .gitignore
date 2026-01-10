@@ -67,3 +67,5 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+# Lock files
+blink.lock
