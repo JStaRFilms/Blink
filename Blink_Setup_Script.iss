@@ -4,7 +4,7 @@
 [Setup]
 ; --- CORE APP INFO ---
 AppName=Blink AI Assistant
-AppVersion=1.0.3
+AppVersion=1.0.4
 AppPublisher=JStaRFilms
 AppPublisherURL=https://github.com/JStaRFilms/Blink
 DefaultDirName={autopf}\Blink
@@ -21,7 +21,7 @@ WizardStyle=modern
 
 ; --- OUTPUT ---
 OutputDir=dist
-OutputBaseFilename=Blink-Setup-v1.0.3
+OutputBaseFilename=Blink-Setup-v1.0.4
 Compression=lzma
 SolidCompression=yes
 

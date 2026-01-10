@@ -138,7 +138,7 @@ Once you have the `Blink.exe`, you can build the professional installer using In
    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" Blink_Setup_Script.iss
    ```
 
-The final installer `Blink-Setup-v1.0.3.exe` will be created in the `dist` folder.
+The final installer `Blink-Setup-v1.0.4.exe` will be created in the `dist` folder.
 
 **Build Order:** Always build the `.exe` first, then the installer. The installer script references the `Blink.exe` from the `dist` folder.
 

@@ -1,0 +1,10 @@
+{
+    "name": "Blink",
+    "slug": "2026-01-10_Blink",
+    "type": "Code",
+    "created": "2026-01-10",
+    "client": "None",
+    "template": "git_clone",
+    "repo_url": "https://github.com/JStaRFilms/Blink.git",
+    "root": "C:\\CreativeOS\\01_Projects\\Code\\Personal_Stuff\\2026-01-10_Blink"
+}
