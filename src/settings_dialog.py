@@ -324,6 +324,10 @@ class SettingsDialog(QDialog):
         Starts background fetching of models using a separate thread.
         """
         try:
+            # Check if thread is already running
+            if hasattr(self, 'model_thread') and self.model_thread.isRunning():
+                return
+                
             from .llm_interface import ModelFetcher
 
             # Create the fetcher and thread
