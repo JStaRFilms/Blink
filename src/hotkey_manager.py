@@ -274,6 +274,10 @@ class HotkeyManager:
             last_error_type = None
             last_error_message = None
 
+            # Initialize capture variables
+            text = None
+            selection_rect = None
+
             while attempt <= max_retries and not success:
                 if attempt > 0:
                     logger.info(f"Retry attempt {attempt} of {max_retries}")
@@ -283,16 +287,18 @@ class HotkeyManager:
                     time.sleep(0.3)
 
                 try:
-                    # Capture text
-                    logger.debug("Attempting to capture selected text...")
-                    text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
+                    # Capture text only if not already captured
+                    if text is None:
+                        logger.debug("Attempting to capture selected text...")
+                        text, selection_rect = self.text_capturer.capture_selected_text_with_rect()
 
-                    if not text or not text.strip():
-                        logger.warning(f"No text selected (attempt {attempt + 1})")
-                        last_error_type = "text_not_selected"
-                        last_error_message = "No text was selected"
-                        attempt += 1
-                        continue
+                        if not text or not text.strip():
+                            logger.warning(f"No text selected (attempt {attempt + 1})")
+                            last_error_type = "text_not_selected"
+                            last_error_message = "No text was selected"
+                            text = None  # Ensure we try again next time
+                            attempt += 1
+                            continue
 
                     logger.debug(f"Captured text: {text[:50]}..." if len(text) > 50 else f"Captured text: {text}")
 
